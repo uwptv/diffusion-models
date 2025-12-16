@@ -213,3 +213,203 @@ class MNISTUNet(ConditionalVectorField):
         x = self.final_conv(x) # (bs, 1, 32, 32)
 
         return x
+    
+class ResidualLayer1D(nn.Module):
+    def __init__(self, channels: int, time_embed_dim: int, y_embed_dim: int):
+        super().__init__()
+        self.block1 = nn.Sequential(
+            nn.SiLU(),
+            nn.BatchNorm1d(channels),
+            nn.Conv1d(channels, channels, kernel_size=3, padding=1)
+        )
+        self.block2 = nn.Sequential(
+            nn.SiLU(),
+            nn.BatchNorm1d(channels),
+            nn.Conv1d(channels, channels, kernel_size=3, padding=1)
+        )
+        # Converts (bs, time_embed_dim) -> (bs, channels)
+        self.time_adapter = nn.Sequential(
+            nn.Linear(time_embed_dim, time_embed_dim),
+            nn.SiLU(),
+            nn.Linear(time_embed_dim, channels)
+        )
+        # Converts (bs, y_embed_dim) -> (bs, channels)
+        self.y_adapter = nn.Sequential(
+            nn.Linear(y_embed_dim, y_embed_dim),
+            nn.SiLU(),
+            nn.Linear(y_embed_dim, channels)
+        )
+
+    def forward(self, x: torch.Tensor, t_embed: torch.Tensor, y_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c, L)
+        - t_embed: (bs, t_embed_dim)
+        - y_embed: (bs, y_embed_dim)
+        """
+        res = x.clone() # (bs, c, L)
+
+        # Initial conv block
+        x = self.block1(x) # (bs, c, L)
+
+        # Add time embedding
+        t_embed = self.time_adapter(t_embed).unsqueeze(-1) # (bs, c, 1)
+        x = x + t_embed
+
+        # Add y embedding (conditional embedding)
+        y_embed = self.y_adapter(y_embed).unsqueeze(-1) # (bs, c, 1)
+        x = x + y_embed
+
+        # Second conv block
+        x = self.block2(x) # (bs, c, L)
+
+        # Add back residual
+        x = x + res # (bs, c, L)
+
+        return x
+
+class Encoder1D(nn.Module):
+    def __init__(self, channels_in: int, channels_out: int, num_residual_layers: int, t_embed_dim: int, y_embed_dim: int):
+        super().__init__()
+        self.res_blocks = nn.ModuleList([
+            ResidualLayer1D(channels_in, t_embed_dim, y_embed_dim) for _ in range(num_residual_layers)
+        ])
+        self.downsample = nn.Conv1d(channels_in, channels_out, kernel_size=3, stride=2, padding=1)
+
+    def forward(self, x: torch.Tensor, t_embed: torch.Tensor, y_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c_in, L)
+        - t_embed: (bs, t_embed_dim)
+        - y_embed: (bs, y_embed_dim)
+        """
+        # Pass through residual blocks: (bs, c_in, L) -> (bs, c_in, L)
+        for block in self.res_blocks:
+            x = block(x, t_embed, y_embed)
+
+        # Downsample: (bs, c_in, L) -> (bs, c_out, L // 2)
+        x = self.downsample(x)
+
+        return x
+
+class Midcoder1D(nn.Module):
+    def __init__(self, channels: int, num_residual_layers: int, t_embed_dim: int, y_embed_dim: int):
+        super().__init__()
+        self.res_blocks = nn.ModuleList([
+            ResidualLayer1D(channels, t_embed_dim, y_embed_dim) for _ in range(num_residual_layers)
+        ])
+
+    def forward(self, x: torch.Tensor, t_embed: torch.Tensor, y_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c, L)
+        - t_embed: (bs, t_embed_dim)
+        - y_embed: (bs, y_embed_dim)
+        """
+        # Pass through residual blocks: (bs, c, L) -> (bs, c, L)
+        for block in self.res_blocks:
+            x = block(x, t_embed, y_embed)
+            
+        return x
+
+class Decoder1D(nn.Module):
+    def __init__(self, channels_in: int, channels_out: int, num_residual_layers: int, t_embed_dim: int, y_embed_dim: int):
+        super().__init__()
+        self.upsample = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='linear', align_corners=False),
+            nn.Conv1d(channels_in, channels_out, kernel_size=3, padding=1)
+        )
+        self.res_blocks = nn.ModuleList([
+            ResidualLayer1D(channels_out, t_embed_dim, y_embed_dim) for _ in range(num_residual_layers)
+        ])
+
+    def forward(self, x: torch.Tensor, t_embed: torch.Tensor, y_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c_in, L)
+        - t_embed: (bs, t_embed_dim)
+        - y_embed: (bs, y_embed_dim)
+        """
+        # Upsample: (bs, c_in, L) -> (bs, c_out, 2*L)
+        x = self.upsample(x)
+        
+        # Pass through residual blocks: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
+        for block in self.res_blocks:
+            x = block(x, t_embed, y_embed)
+
+        return x
+
+class SineWaveUNet(ConditionalVectorField):
+    """
+    1D UNet for conditional sine wave generation
+    Conditions on continuous parameters: [amplitude_norm, cos(phase), sin(phase)]
+    """
+    def __init__(self, channels: List[int], num_residual_layers: int, t_embed_dim: int, y_embed_dim: int, y_input_dim: int = 3): 
+        super().__init__()
+        # Initial convolution: (bs, 1, L) -> (bs, c_0, L)
+        self.init_conv = nn.Sequential(
+            nn.Conv1d(1, channels[0], kernel_size=3, padding=1),
+            nn.BatchNorm1d(channels[0]),
+            nn.SiLU()
+        )
+
+        # Initialize time embedder
+        self.time_embedder = FourierEncoder(t_embed_dim)
+
+        # Initialize y embedder (for continuous conditioning)
+        self.y_embedder = nn.Sequential(
+            nn.Linear(y_input_dim, y_embed_dim),
+            nn.SiLU(),
+            nn.Linear(y_embed_dim, y_embed_dim)
+        )
+
+        # Encoders and Decoders
+        encoders = []
+        decoders = []
+        for (curr_c, next_c) in zip(channels[:-1], channels[1:]):
+            encoders.append(Encoder1D(curr_c, next_c, num_residual_layers, t_embed_dim, y_embed_dim))
+            decoders.append(Decoder1D(next_c, curr_c, num_residual_layers, t_embed_dim, y_embed_dim))
+        self.encoders = nn.ModuleList(encoders)
+        self.decoders = nn.ModuleList(reversed(decoders))
+
+        self.midcoder = Midcoder1D(channels[-1], num_residual_layers, t_embed_dim, y_embed_dim)
+            
+        # Final convolution
+        self.final_conv = nn.Conv1d(channels[0], 1, kernel_size=3, padding=1)
+
+    def forward(self, x: torch.Tensor, t: torch.Tensor, y: torch.Tensor):
+        """
+        Args:
+        - x: (bs, 1, L) where L is signal length
+        - t: (bs, 1, 1) time parameter
+        - y: (bs, 3) continuous conditioning [amplitude_norm, cos(phase), sin(phase)]
+        Returns:
+        - u_t^theta(x|y): (bs, 1, L)
+        """
+        # Embed t and y
+        t_embed = self.time_embedder(t) # (bs, t_embed_dim)
+        y_embed = self.y_embedder(y) # (bs, y_embed_dim)
+        
+        # Initial convolution
+        x = self.init_conv(x) # (bs, c_0, L)
+
+        residuals = []
+        
+        # Encoders
+        for encoder in self.encoders:
+            x = encoder(x, t_embed, y_embed) # (bs, c_i, L) -> (bs, c_{i+1}, L // 2)
+            residuals.append(x.clone())
+
+        # Midcoder
+        x = self.midcoder(x, t_embed, y_embed)
+
+        # Decoders
+        for decoder in self.decoders:
+            res = residuals.pop() # (bs, c_i, L)
+            x = x + res
+            x = decoder(x, t_embed, y_embed) # (bs, c_i, L) -> (bs, c_{i-1}, 2*L)
+
+        # Final convolution
+        x = self.final_conv(x) # (bs, 1, L)
+
+        return x
