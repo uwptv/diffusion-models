@@ -74,38 +74,47 @@ def visualize_gaussian_cond_prob_path():
     plt.show()
 
 def visualize_sine_wave_path():
-    num_rows = 5
-    num_cols = 5
+    num_samples = 6
     num_timesteps = 5
 
-    # Initialize our sampler
-    sampler = SineWaveSampler().to(device)
-
-    # Initialize probability path
+    sampler = SineWaveSampler()
+    signal_length = sampler.sample_rate * sampler.duration
     path = GaussianConditionalProbabilityPath(
-        p_data = sampler,
-        p_simple_shape = [int(100.0 * 1.0)],  # sample_rate * duration
-        alpha = LinearAlpha(),
-        beta = LinearBeta()
+        p_data=sampler,
+        p_simple_shape=[signal_length],
+        alpha=LinearAlpha(),
+        beta=LinearBeta(),
     ).to(device)
 
-    # Sample 
-    num_samples = num_rows * num_cols
-    z, _ = path.p_data.sample(num_samples)
-    z = z.view(-1, 1, int(100.0 * 1.0))  # (num_samples, 1, signal_length)
+    z, _ = path.p_data.sample(num_samples)            # (num_samples, signal_len)
+    z = z.to(device)
+    eps = torch.randn_like(z)                         # fixed noise per sample for smooth trajectories
+    ts = torch.linspace(0, 1, num_timesteps, device=device)
+    t_axis = torch.linspace(0, getattr(path.p_data, "duration", 1.0), z.shape[-1])
 
-    # Setup plot
-    fig, axes = plt.subplots(1, num_timesteps, figsize=(6 * num_cols * num_timesteps, 6 * num_rows))
+    fig, axes = plt.subplots(num_samples, num_timesteps,
+                             figsize=(3 * num_timesteps, 1.6 * num_samples),
+                             sharex=True, sharey=True)
+    axes = axes.reshape(num_samples, num_timesteps)
 
-    # Sample from conditional probability paths and graph
-    ts = torch.linspace(0, 1, num_timesteps).to(device)
     for tidx, t in enumerate(ts):
-        tt = t.view(1,1,1).expand(num_samples, 1, 1) # (num_samples, 1, 1)
-        xt = path.sample_conditional_path(z, tt) # (num_samples, 1, signal_length)
-        
-        for i in range(num_samples):
-            axes[tidx].plot(xt[i,0].cpu(), alpha=0.5)
-        axes[tidx].set_title(f'Time t={t.item():.2f}')
+        tt = t.expand(num_samples, 1)                 # shape (num_samples, 1) broadcasts with z
+        alpha_t = path.alpha(tt)
+        beta_t = path.beta(tt)
+        xt = (alpha_t * z + beta_t * eps).detach().cpu()
+
+        for sidx in range(num_samples):
+            ax = axes[sidx, tidx]
+            ax.plot(t_axis.cpu(), xt[sidx])
+            if sidx == 0:
+                ax.set_title(f"t={float(t):.2f}", fontsize=10)
+            if tidx == 0:
+                ax.set_ylabel(f"sample {sidx}", fontsize=8)
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+    fig.suptitle("Gaussian conditional path for sine waves", fontsize=14)
+    plt.tight_layout()
     plt.show()
 
 def visualize_generated_mnist_samples(path: ConditionalProbabilityPath, model: ConditionalVectorField):
