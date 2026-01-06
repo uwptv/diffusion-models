@@ -86,11 +86,9 @@ def visualize_sine_wave_path():
         beta=LinearBeta(),
     ).to(device)
 
-    z, _ = path.p_data.sample(num_samples)            # (num_samples, signal_len)
-    z = z.to(device)
-    eps = torch.randn_like(z)                         # fixed noise per sample for smooth trajectories
+    z, labels = path.p_data.sample(num_samples) # (num_samples, signal_len)
     ts = torch.linspace(0, 1, num_timesteps, device=device)
-    t_axis = torch.linspace(0, getattr(path.p_data, "duration", 1.0), z.shape[-1])
+    t_axis = torch.linspace(0, sampler.duration, signal_length)
 
     fig, axes = plt.subplots(num_samples, num_timesteps,
                              figsize=(3 * num_timesteps, 1.6 * num_samples),
@@ -98,10 +96,8 @@ def visualize_sine_wave_path():
     axes = axes.reshape(num_samples, num_timesteps)
 
     for tidx, t in enumerate(ts):
-        tt = t.expand(num_samples, 1)                 # shape (num_samples, 1) broadcasts with z
-        alpha_t = path.alpha(tt)
-        beta_t = path.beta(tt)
-        xt = (alpha_t * z + beta_t * eps).detach().cpu()
+        tt = t.expand(num_samples, 1) # shape (num_samples, 1) broadcasts with z
+        xt = path.sample_conditional_path(z, tt).detach().cpu()
 
         for sidx in range(num_samples):
             ax = axes[sidx, tidx]
@@ -109,7 +105,8 @@ def visualize_sine_wave_path():
             if sidx == 0:
                 ax.set_title(f"t={float(t):.2f}", fontsize=10)
             if tidx == 0:
-                ax.set_ylabel(f"sample {sidx}", fontsize=8)
+                freq = labels[sidx].item()
+                ax.set_ylabel(f"f={freq:.3f}", fontsize=8)
             ax.set_xticks([])
             ax.set_yticks([])
 
