@@ -81,12 +81,12 @@ def visualize_sine_wave_path():
     signal_length = sampler.sample_rate * sampler.duration
     path = GaussianConditionalProbabilityPath(
         p_data=sampler,
-        p_simple_shape=[signal_length],
+        p_simple_shape=[1, signal_length],
         alpha=LinearAlpha(),
         beta=LinearBeta(),
     ).to(device)
 
-    z, labels = path.p_data.sample(num_samples) # (num_samples, signal_len)
+    z, labels = path.p_data.sample(num_samples) # z shape (num_samples, 1, signal_len), labels shape (num_samples, 1)
     ts = torch.linspace(0, 1, num_timesteps, device=device)
     t_axis = torch.linspace(0, sampler.duration, signal_length)
 
@@ -96,8 +96,9 @@ def visualize_sine_wave_path():
     axes = axes.reshape(num_samples, num_timesteps)
 
     for tidx, t in enumerate(ts):
-        tt = t.expand(num_samples, 1) # shape (num_samples, 1) broadcasts with z
-        xt = path.sample_conditional_path(z, tt).detach().cpu()
+        tt = t.expand(num_samples, 1, 1) # shape (num_samples, 1, 1) broadcasts with z
+        xt = path.sample_conditional_path(z, tt).detach().cpu() # (num_samples, 1, signal_length)
+        xt = xt.squeeze(1)  # (num_samples, signal_length)
 
         for sidx in range(num_samples):
             ax = axes[sidx, tidx]

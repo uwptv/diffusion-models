@@ -342,7 +342,6 @@ class Decoder1D(nn.Module):
 class SineWaveUNet(ConditionalVectorField):
     """
     1D UNet for conditional sine wave generation
-    Conditions on continuous parameters: [amplitude_norm, cos(phase), sin(phase)]
     """
     def __init__(self, channels: List[int], num_residual_layers: int, t_embed_dim: int, y_embed_dim: int, y_input_dim: int = 3): 
         super().__init__()
@@ -380,9 +379,9 @@ class SineWaveUNet(ConditionalVectorField):
     def forward(self, x: torch.Tensor, t: torch.Tensor, y: torch.Tensor):
         """
         Args:
-        - x: (bs, 1, L) where L is signal length
-        - t: (bs, 1, 1) time parameter
-        - y: (bs, 3) continuous conditioning [amplitude_norm, cos(phase), sin(phase)]
+        - x: (bs, L) where L is signal length
+        - t: (bs, 1) time parameter
+        - y: (bs, 1) frequency label
         Returns:
         - u_t^theta(x|y): (bs, 1, L)
         """

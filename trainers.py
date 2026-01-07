@@ -65,3 +65,27 @@ class CFGTrainer(Trainer):
         u_t_theta = self.model(x, t, y)
         u_t = self.path.conditional_vector_field(x, z, t)
         return torch.mean((u_t - u_t_theta) ** 2)
+    
+class SineWaveTrainer(Trainer):
+    def __init__(self, path: GaussianConditionalProbabilityPath, model: ConditionalVectorField, eta: float, **kwargs):
+        assert eta > 0 and eta < 1
+        super().__init__(model, **kwargs)
+        self.eta = eta
+        self.path = path
+
+    def get_train_loss(self, batch_size: int) -> torch.Tensor:
+        # Step 1: Sample z,y from p_data
+        z, y = self.path.sample_conditioning_variable(batch_size) # z shape (batch_size, seq_len), y shape (batch_size, 1)
+        
+        # Step 2: Set each label to frequency 0 with probability eta
+        mask = torch.rand(batch_size) < self.eta
+        y[mask] = 0.0
+        
+        # Step 3: Sample t and x
+        t = torch.rand(batch_size, 1).to(z.device) # (batch_size, 1)
+        x = self.path.sample_conditional_path(z, t) # (batch_size, seq_len)
+
+        # Step 4: Regress and output loss
+        u_t_theta = self.model(x, t, y)
+        u_t = self.path.conditional_vector_field(x, z, t)
+        return torch.mean((u_t - u_t_theta) ** 2)

@@ -89,7 +89,7 @@ class SineWaveSampler(nn.Module, Sampleable):
         Args:
             - num_samples: the desired number of samples
         Returns:
-            - samples: shape (num_samples, signal_length = sample_rate * duration)
+            - samples: shape (num_samples, channels = 1, signal_length = sample_rate * duration)
             - labels: shape (num_samples, 1) containing frequency
         """
         t = torch.linspace(0, self.duration, self.sample_rate * self.duration, device=self.dummy.device) # (signal_length,)
@@ -97,6 +97,7 @@ class SineWaveSampler(nn.Module, Sampleable):
 
         # Vectorized sine wave generation
         waves = self.amplitude * torch.sin(2 * torch.pi * frequencies * t + self.phase) # (num_samples, signal_length)
+        waves = waves.unsqueeze(1)  # reshape to (num_samples, 1, signal_length) for backbone
 
         return waves, frequencies
     
@@ -105,7 +106,7 @@ def visualize_sinewave_samples(samples: torch.Tensor, labels: torch.Tensor):
     plt.figure(figsize=(10, 6))
     for i in range(samples.shape[0]):
         freq = labels[i].item()
-        plt.plot(t.cpu(), samples[i].cpu(),
+        plt.plot(t.cpu(), samples[i, 0].cpu(),
                  label=f'f={freq:.3f} Hz')
     plt.title('Sine Wave Samples')
     plt.xlabel('Time')
