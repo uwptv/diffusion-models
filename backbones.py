@@ -343,7 +343,7 @@ class SineWaveUNet(ConditionalVectorField):
     """
     1D UNet for conditional sine wave generation
     """
-    def __init__(self, channels: List[int], num_residual_layers: int, t_embed_dim: int, y_embed_dim: int, y_input_dim: int = 3): 
+    def __init__(self, channels: List[int], num_residual_layers: int, t_embed_dim: int, y_embed_dim: int, y_input_dim: int = 1): 
         super().__init__()
         # Initial convolution: (bs, 1, L) -> (bs, c_0, L)
         self.init_conv = nn.Sequential(
@@ -379,8 +379,8 @@ class SineWaveUNet(ConditionalVectorField):
     def forward(self, x: torch.Tensor, t: torch.Tensor, y: torch.Tensor):
         """
         Args:
-        - x: (bs, L) where L is signal length
-        - t: (bs, 1) time parameter
+        - x: (bs, 1, L) where L is signal length and 1 the number of channels
+        - t: (bs, 1, 1) time parameter
         - y: (bs, 1) frequency label
         Returns:
         - u_t^theta(x|y): (bs, 1, L)

@@ -144,16 +144,48 @@ def visualize_generated_mnist_samples(path: ConditionalProbabilityPath, model: C
         axes[idx].set_title(f"Guidance: $w={w:.1f}$", fontsize=25)
     plt.show()
 
-def visualize_sinewave_samples(samples: torch.Tensor):
-    num_samples = samples.shape[0]
-    t = torch.linspace(0, 1, samples.shape[1])
+def visualize_generated_sine_waves(model: ConditionalVectorField,
+                                   num_freqs: int = 5,
+                                   samples_per_freq: int = 1,
+                                   num_timesteps: int = 100,
+                                   guidance_scales = (1.0,)):
+    """
+    Sample random frequencies, generate sine waves via the trained model, and plot them.
+    """
+    model.eval()
 
-    plt.figure(figsize=(12, 8))
-    for i in range(num_samples):
-        plt.plot(t.cpu(), samples[i].cpu(), label=f'Sample {i+1}')
-    plt.title('Sine Wave Samples')
-    plt.xlabel('Time')
-    plt.ylabel('Amplitude')
-    plt.legend()
-    plt.grid()
+    # Infer signal length from the sine sampler defaults (keeps consistent with training)
+    sampler = SineWaveSampler()
+    signal_length = sampler.sample_rate * sampler.duration
+    t_axis = torch.linspace(0, sampler.duration, signal_length, device=device)
+
+    # Random frequencies in [0, 1]; repeat for multiple samples per frequency
+    base_freqs = torch.rand(num_freqs, 1, device=device)                # (num_freqs, 1)
+    frequencies = base_freqs.repeat_interleave(samples_per_freq, dim=0) # (num_samples, 1)
+    num_samples = frequencies.shape[0]
+
+    # Initial noise and time discretization (shape-safe for 1D)
+    x0 = torch.randn(num_samples, 1, signal_length, device=device)      # (bs, 1, L)
+    ts = torch.linspace(0, 1, num_timesteps, device=device)             # (nts,)
+    ts = ts.view(1, -1, 1, 1).expand(num_samples, -1, 1, 1)             # (bs, nts, 1, 1)
+
+    fig, axes = plt.subplots(1, len(guidance_scales), figsize=(10 * len(guidance_scales), 6))
+    if len(guidance_scales) == 1:
+        axes = [axes]
+
+    with torch.no_grad():
+        for ax, w in zip(axes, guidance_scales):
+            ode = CFGVectorFieldODE(model, guidance_scale=float(w))
+            simulator = EulerSimulator(ode)
+            x1 = simulator.simulate(x0.clone(), ts, y=frequencies)      # (bs, 1, L)
+
+            for sidx in range(num_samples):
+                ax.plot(t_axis.cpu(), x1[sidx, 0].detach().cpu(), alpha=0.7)
+
+            ax.set_title(f"Guidance: w={float(w):.1f}", fontsize=14)
+            ax.set_xlabel("Time")
+            ax.set_ylabel("Amplitude")
+
+    plt.tight_layout()
     plt.show()
+

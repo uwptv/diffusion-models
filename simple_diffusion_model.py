@@ -3,7 +3,7 @@ from probability_paths import ConditionalProbabilityPath, GaussianConditionalPro
 from distributions import MNISTSampler, SineWaveSampler
 from backbones import MNISTUNet, SineWaveUNet
 from trainers import CFGTrainer, SineWaveTrainer
-from utility import visualize_generated_mnist_samples, visualize_sine_wave_path, visualize_gaussian_cond_prob_path 
+from utility import visualize_generated_mnist_samples, visualize_sine_wave_path, visualize_gaussian_cond_prob_path, visualize_generated_sine_waves
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
@@ -32,22 +32,24 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # visualize_generated_mnist_samples(path = path, model = unet)
 
 # Initialize probability path for sine wave generation
-# path = GaussianConditionalProbabilityPath(
-#     p_data = SineWaveSampler(),
-#     p_simple_shape = [1, 100 * int(2 * torch.pi)],  # (channels = 1, sample_rate * duration)
-#     alpha = LinearAlpha(),
-#     beta = LinearBeta()
-# ).to(device)
+path = GaussianConditionalProbabilityPath(
+    p_data = SineWaveSampler(),
+    p_simple_shape = [1, 100 * int(2 * torch.pi)],  # (channels = 1, sample_rate * duration)
+    alpha = LinearAlpha(),
+    beta = LinearBeta()
+).to(device)
 
-visualize_sine_wave_path()
+# visualize_sine_wave_path()
 
 # Initialize model for sine wave generation
-# tunet = SineWaveUNet(
-#     channels = [64, 128, 256],
-#     num_residual_layers = 2,
-#     t_embed_dim = 40,
-#     y_embed_dim = 40,
-# )
+tunet = SineWaveUNet(
+    channels = [32, 64, 128],
+    num_residual_layers = 2,
+    t_embed_dim = 40,
+    y_embed_dim = 40,
+)
 
-# trainer = SineWaveTrainer(path = path, model = tunet, eta=0.1)
-# trainer.train(num_epochs = 500, device=device, lr=1e-3, batch_size=250)
+trainer = SineWaveTrainer(path = path, model = tunet, eta=0.1)
+trainer.train(num_epochs = 1000, device=device, lr=1e-3, batch_size=250)
+
+visualize_generated_sine_waves(model=tunet, guidance_scales=(1.0, 3.0, 5.0))

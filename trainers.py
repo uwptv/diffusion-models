@@ -75,15 +75,15 @@ class SineWaveTrainer(Trainer):
 
     def get_train_loss(self, batch_size: int) -> torch.Tensor:
         # Step 1: Sample z,y from p_data
-        z, y = self.path.sample_conditioning_variable(batch_size) # z shape (batch_size, seq_len), y shape (batch_size, 1)
+        z, y = self.path.sample_conditioning_variable(batch_size) # z shape (batch_size, 1, seq_len), y shape (batch_size, 1)
         
         # Step 2: Set each label to frequency 0 with probability eta
         mask = torch.rand(batch_size) < self.eta
         y[mask] = 0.0
         
         # Step 3: Sample t and x
-        t = torch.rand(batch_size, 1).to(z.device) # (batch_size, 1)
-        x = self.path.sample_conditional_path(z, t) # (batch_size, seq_len)
+        t = torch.rand(batch_size, 1, 1).to(z.device) # (batch_size, 1, 1)
+        x = self.path.sample_conditional_path(z, t) # (batch_size, 1, seq_len)
 
         # Step 4: Regress and output loss
         u_t_theta = self.model(x, t, y)
