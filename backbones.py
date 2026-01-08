@@ -339,15 +339,15 @@ class Decoder1D(nn.Module):
 
         return x
 
-class SineWaveUNet(ConditionalVectorField):
+class TUNet(ConditionalVectorField):
     """
     1D UNet for conditional sine wave generation
     """
-    def __init__(self, channels: List[int], num_residual_layers: int, t_embed_dim: int, y_embed_dim: int, y_input_dim: int = 1): 
+    def __init__(self, channels: List[int], num_residual_layers: int, t_embed_dim: int, y_embed_dim: int, y_input_dim: int = 1, input_channels: int = 1): 
         super().__init__()
         # Initial convolution: (bs, 1, L) -> (bs, c_0, L)
         self.init_conv = nn.Sequential(
-            nn.Conv1d(1, channels[0], kernel_size=3, padding=1),
+            nn.Conv1d(input_channels, channels[0], kernel_size=3, padding=1),
             nn.BatchNorm1d(channels[0]),
             nn.SiLU()
         )

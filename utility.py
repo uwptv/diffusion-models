@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import torch
 from torch import nn
-from distributions import MNISTSampler, SineWaveSampler
+from distributions import MNISTSampler, SineWaveSampler, WaveSampler
 from probability_paths import ConditionalProbabilityPath, GaussianConditionalProbabilityPath, LinearAlpha, LinearBeta
 from differential_equations import ConditionalVectorField, CFGVectorFieldODE
 from simulators import EulerSimulator
@@ -115,6 +115,48 @@ def visualize_sine_wave_path():
     plt.tight_layout()
     plt.show()
 
+def visualize_wave_path():
+    num_samples = 6
+    num_timesteps = 5
+
+    sampler = WaveSampler()
+    signal_length = sampler.sample_rate * sampler.duration
+    path = GaussianConditionalProbabilityPath(
+        p_data=sampler,
+        p_simple_shape=[3, signal_length],
+        alpha=LinearAlpha(),
+        beta=LinearBeta(),
+    ).to(device)
+
+    z, labels = path.p_data.sample(num_samples) # z shape (num_samples, 3, signal_len), labels shape (num_samples, 1)
+    ts = torch.linspace(0, 1, num_timesteps, device=device)
+    t_axis = torch.linspace(0, sampler.duration, signal_length)
+
+    fig, axes = plt.subplots(num_samples, num_timesteps,
+                             figsize=(3 * num_timesteps, 1.6 * num_samples),
+                             sharex=True, sharey=True)
+    axes = axes.reshape(num_samples, num_timesteps)
+
+    for tidx, t in enumerate(ts):
+        tt = t.expand(num_samples, 1, 1) # shape (num_samples, 1, 1) broadcasts with z
+        xt = path.sample_conditional_path(z, tt).detach().cpu() # (num_samples, 3, signal_length)
+
+        for sidx in range(num_samples):
+            ax = axes[sidx, tidx]
+            for channel in range(3):
+                ax.plot(t_axis.cpu(), xt[sidx, channel], alpha=0.7)
+            if sidx == 0:
+                ax.set_title(f"t={float(t):.2f}", fontsize=10)
+            if tidx == 0:
+                freq = labels[sidx].item()
+                ax.set_ylabel(f"f={freq:.3f}", fontsize=8)
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+    fig.suptitle("Gaussian conditional path for waves", fontsize=14)
+    plt.tight_layout()
+    plt.show()
+
 def visualize_generated_mnist_samples(path: ConditionalProbabilityPath, model: ConditionalVectorField):
     samples_per_class = 10
     num_timesteps = 100
@@ -189,3 +231,48 @@ def visualize_generated_sine_waves(model: ConditionalVectorField,
     plt.tight_layout()
     plt.show()
 
+def visualize_generated_waves(model: ConditionalVectorField,
+                             num_freqs: int = 5,
+                             samples_per_freq: int = 1,
+                             num_timesteps: int = 100,
+                             guidance_scales = (1.0,)):
+    """
+    Sample random frequencies, generate waves via the trained model, and plot them.
+    """
+    model.eval()
+
+    # Infer signal length from the wave sampler defaults (keeps consistent with training)
+    sampler = WaveSampler()
+    signal_length = sampler.sample_rate * sampler.duration
+    t_axis = torch.linspace(0, sampler.duration, signal_length, device=device)
+
+    # Random frequencies in [0, 1]; repeat for multiple samples per frequency
+    base_freqs = torch.rand(num_freqs, 1, device=device)                # (num_freqs, 1)
+    frequencies = base_freqs.repeat_interleave(samples_per_freq, dim=0) # (num_samples, 1)
+    num_samples = frequencies.shape[0]
+
+    # Initial noise and time discretization (shape-safe for 1D)
+    x0 = torch.randn(num_samples, 3, signal_length, device=device)      # (bs, 3, L)
+    ts = torch.linspace(0, 1, num_timesteps, device=device)             # (nts,)
+    ts = ts.view(1, -1, 1, 1).expand(num_samples, -1, 1, 1)             # (bs, nts, 1, 1)
+
+    fig, axes = plt.subplots(1, len(guidance_scales), figsize=(10 * len(guidance_scales), 6))
+    if len(guidance_scales) == 1:
+        axes = [axes]
+
+    with torch.no_grad():
+        for ax, w in zip(axes, guidance_scales):
+            ode = CFGVectorFieldODE(model, guidance_scale=float(w))
+            simulator = EulerSimulator(ode)
+            x1 = simulator.simulate(x0.clone(), ts, y=frequencies)      # (bs, 3, L)
+
+            for sidx in range(num_samples):
+                for channel in range(3):
+                    ax.plot(t_axis.cpu(), x1[sidx, channel].detach().cpu(), alpha=0.7)
+
+            ax.set_title(f"Guidance: w={float(w):.1f}", fontsize=14)
+            ax.set_xlabel("Time")
+            ax.set_ylabel("Amplitude")
+
+    plt.tight_layout()
+    plt.show()
