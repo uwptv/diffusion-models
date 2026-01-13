@@ -83,9 +83,9 @@ class SineWaveTrainer(Trainer):
         # Step 1: Sample z,y from p_data
         z, y = self.path.sample_conditioning_variable(batch_size) # z shape (batch_size, 1, seq_len), y shape (batch_size, 1)
         
-        # Step 2: Set each label to frequency 0 with probability eta
+        # Step 2: Set each label to amplitude 0 with probability eta
         mask = torch.rand(batch_size) < self.eta
-        y[mask] = 0.0
+        y[mask] = 0
         
         # Step 3: Sample t and x
         t = torch.rand(batch_size, 1, 1).to(z.device) # (batch_size, 1, 1)

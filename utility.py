@@ -206,47 +206,71 @@ def visualize_generated_mnist_samples(path: ConditionalProbabilityPath, model: C
     plt.show()
 
 def visualize_generated_sine_waves(model: ConditionalVectorField,
-                                   num_freqs: int = 5,
-                                   samples_per_freq: int = 1,
+                                   samples_per_amplitude: int = 3,
                                    num_timesteps: int = 100,
                                    guidance_scales = (1.0,)):
     """
-    Sample random frequencies, generate sine waves via the trained model, and plot them.
+    Generate sine waves per amplitude class via the trained model, and plot them grouped by amplitude.
+    
+    Args:
+        - model: trained conditional vector field model
+        - samples_per_amplitude: number of samples to generate per amplitude class
+        - num_timesteps: number of time steps for ODE simulation
+        - guidance_scales: tuple of guidance scale values to test
     """
     model.eval()
 
-    # Infer signal length from the sine sampler defaults (keeps consistent with training)
+    # Infer signal length and amplitude classes from the sine sampler
     sampler = SineWaveSampler()
     signal_length = sampler.sample_rate * sampler.duration
     t_axis = torch.linspace(0, sampler.duration, signal_length, device=device)
+    amplitudes = sampler.amplitudes  # e.g., [1, 2, 3]
+    num_classes = len(amplitudes)
+    
+    # Create CLASS INDEX labels: [0, 0, 0, 1, 1, 1, 2, 2, 2, ...]
+    class_indices = torch.arange(num_classes, device=device).repeat_interleave(samples_per_amplitude)  # (num_samples,)
+    num_samples = class_indices.shape[0]
 
-    # Random frequencies in [0, 1]; repeat for multiple samples per frequency
-    base_freqs = torch.rand(num_freqs, 1, device=device)                # (num_freqs, 1)
-    frequencies = base_freqs.repeat_interleave(samples_per_freq, dim=0) # (num_samples, 1)
-    num_samples = frequencies.shape[0]
-
-    # Initial noise and time discretization (shape-safe for 1D)
+    # Initial noise and time discretization
     x0 = torch.randn(num_samples, 1, signal_length, device=device)      # (bs, 1, L)
     ts = torch.linspace(0, 1, num_timesteps, device=device)             # (nts,)
     ts = ts.view(1, -1, 1, 1).expand(num_samples, -1, 1, 1)             # (bs, nts, 1, 1)
 
-    fig, axes = plt.subplots(1, len(guidance_scales), figsize=(10 * len(guidance_scales), 6))
-    if len(guidance_scales) == 1:
-        axes = [axes]
+    # Create subplots: rows = amplitude classes, cols = guidance scales
+    fig, axes = plt.subplots(num_classes, len(guidance_scales), 
+                            figsize=(8 * len(guidance_scales), 4 * num_classes),
+                            squeeze=False)
 
     with torch.no_grad():
-        for ax, w in zip(axes, guidance_scales):
+        for col_idx, w in enumerate(guidance_scales):
             ode = CFGVectorFieldODE(model, guidance_scale=float(w))
             simulator = EulerSimulator(ode)
-            x1 = simulator.simulate(x0.clone(), ts, y=frequencies)      # (bs, 1, L)
+            x1 = simulator.simulate(x0.clone(), ts, y=class_indices)  # (bs, 1, L)
 
-            for sidx in range(num_samples):
-                ax.plot(t_axis.cpu(), x1[sidx, 0].detach().cpu(), alpha=0.7)
+            # Plot samples grouped by amplitude class
+            for class_idx, amplitude in enumerate(amplitudes):
+                ax = axes[class_idx, col_idx]
+                
+                # Get indices for this amplitude class
+                start_idx = class_idx * samples_per_amplitude
+                end_idx = start_idx + samples_per_amplitude
+                
+                # Plot all samples in this amplitude class
+                for sample_idx in range(start_idx, end_idx):
+                    ax.plot(t_axis.cpu(), x1[sample_idx, 0].detach().cpu(), 
+                           alpha=0.7, label=f'Sample {sample_idx - start_idx + 1}')
 
-            ax.set_title(f"Guidance: w={float(w):.1f}", fontsize=14)
-            ax.set_xlabel("Time")
-            ax.set_ylabel("Amplitude")
+                # Set titles and labels
+                if class_idx == 0:
+                    ax.set_title(f"Guidance: w={float(w):.1f}", fontsize=14, fontweight='bold')
+                if col_idx == 0:
+                    ax.set_ylabel(f"Amplitude: {amplitude}", fontsize=12, fontweight='bold')
+                
+                ax.set_xlabel("Time")
+                ax.legend(loc='upper right', fontsize='small')
+                ax.grid(True, alpha=0.3)
 
+    fig.suptitle("Generated Sine Waves by Amplitude Class", fontsize=16, fontweight='bold')
     plt.tight_layout()
     plt.show()
 

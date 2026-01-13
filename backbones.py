@@ -29,6 +29,60 @@ class FourierEncoder(nn.Module):
         cos_embed = torch.cos(freqs) # (bs, half_dim)
         return torch.cat([sin_embed, cos_embed], dim=-1) * math.sqrt(2) # (bs, dim)
     
+class SinusoidalTimeEmbedding(nn.Module):
+    def __init__(self, dim: int):
+        super().__init__()
+ 
+        assert dim % 2 == 0
+        self.half_dim = dim // 2
+ 
+    def forward(self, t: torch.Tensor) -> torch.Tensor:
+        # t: (B,) or (B, 1)
+ 
+        t = t.view(-1, 1)
+        # (B, 1)
+ 
+        # Compute frequencies: [1, 10000^(2i/d)]
+        freqs = torch.exp(
+            -math.log(10000)
+            * torch.arange(0, self.half_dim, dtype=torch.float32)
+            / self.half_dim
+        ).to(t.device)
+        # (half_dim,)
+ 
+        angles = t * freqs * 2 * math.pi
+        # (B, half_dim)
+ 
+        emb = torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)
+        # (B, dim)
+ 
+        return emb
+
+class Conditioner(nn.Module):
+    def __init__(self, num_classes: int, t_dim: int, y_dim: int, cond_dim: int) -> None:
+        super().__init__()
+ 
+        self.t_embedder = SinusoidalTimeEmbedding(t_dim)
+        self.y_embedder = nn.Embedding(num_classes + 1, y_dim)
+ 
+        self.mlp = nn.Sequential(
+            nn.Linear(t_dim + y_dim, cond_dim),
+            nn.SiLU(),
+            nn.Linear(cond_dim, cond_dim),
+        )
+ 
+    def forward(self, t: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        # t: (B,)
+        # y: (B,)
+ 
+        t_embed = self.t_embedder(t)
+        y_embed = self.y_embedder(y)
+        cond = torch.cat([t_embed, y_embed], dim=1)
+        cond = self.mlp(cond)
+        # (B, cond_dim)
+ 
+        return cond
+    
 class ResidualLayer(nn.Module):
     def __init__(self, channels: int, time_embed_dim: int, y_embed_dim: int):
         super().__init__()
@@ -343,74 +397,67 @@ class TUNet(ConditionalVectorField):
     """
     1D UNet for conditional sine wave generation
     """
-    def __init__(self, channels: List[int], num_residual_layers: int, t_embed_dim: int, y_embed_dim: int, y_input_dim: int = 1, input_channels: int = 1): 
+    def __init__(self, channels: List[int], num_residual_layers: int, 
+                 cond_dim: int, num_classes: int, input_channels: int = 1): 
         super().__init__()
-        # Initial convolution: (bs, 1, L) -> (bs, c_0, L)
+        
         self.init_conv = nn.Sequential(
             nn.Conv1d(input_channels, channels[0], kernel_size=3, padding=1),
             nn.BatchNorm1d(channels[0]),
             nn.SiLU()
         )
 
-        # Initialize time embedder
-        self.time_embedder = FourierEncoder(t_embed_dim)
-
-        # Initialize y embedder (for continuous conditioning)
-        self.y_embedder = nn.Sequential(
-            nn.Linear(y_input_dim, y_embed_dim),
-            nn.SiLU(),
-            nn.Linear(y_embed_dim, y_embed_dim)
+        # Replace separate embedders with Conditioner
+        self.conditioner = Conditioner(
+            num_classes=num_classes,  # e.g., 3 for your amplitude classes
+            t_dim=128,               # time embedding dimension
+            y_dim=128,               # class embedding dimension
+            cond_dim=cond_dim        # final conditioning dimension
         )
 
-        # Encoders and Decoders
+        # Encoders and Decoders (use cond_dim for both t_embed_dim and y_embed_dim)
         encoders = []
         decoders = []
         for (curr_c, next_c) in zip(channels[:-1], channels[1:]):
-            encoders.append(Encoder1D(curr_c, next_c, num_residual_layers, t_embed_dim, y_embed_dim))
-            decoders.append(Decoder1D(next_c, curr_c, num_residual_layers, t_embed_dim, y_embed_dim))
+            encoders.append(Encoder1D(curr_c, next_c, num_residual_layers, cond_dim, cond_dim))
+            decoders.append(Decoder1D(next_c, curr_c, num_residual_layers, cond_dim, cond_dim))
         self.encoders = nn.ModuleList(encoders)
         self.decoders = nn.ModuleList(reversed(decoders))
 
-        self.midcoder = Midcoder1D(channels[-1], num_residual_layers, t_embed_dim, y_embed_dim)
-            
-        # Final convolution
+        self.midcoder = Midcoder1D(channels[-1], num_residual_layers, cond_dim, cond_dim)
         self.final_conv = nn.Conv1d(channels[0], 1, kernel_size=3, padding=1)
 
     def forward(self, x: torch.Tensor, t: torch.Tensor, y: torch.Tensor):
         """
         Args:
-        - x: (bs, 1, L) where L is signal length and 1 the number of channels
-        - t: (bs, 1, 1) time parameter
-        - y: (bs, 1) frequency label
-        Returns:
-        - u_t^theta(x|y): (bs, 1, L)
+        - x: (bs, 1, L)
+        - t: (bs, 1, 1) -> will be squeezed to (bs,)
+        - y: (bs,) integer class indices [0, num_classes-1]
         """
-        # Embed t and y
-        t_embed = self.time_embedder(t) # (bs, t_embed_dim)
-        y_embed = self.y_embedder(y) # (bs, y_embed_dim)
+        # Get unified conditioning vector
+        t = t.squeeze(-1).squeeze(-1)  # (bs,)
+        y = y.squeeze(-1)  # (bs,)
+        cond = self.conditioner(t, y)  # (bs, cond_dim)
         
-        # Initial convolution
-        x = self.init_conv(x) # (bs, c_0, L)
-
+        # Use same conditioning for both time and class
+        t_embed = cond
+        y_embed = cond
+        
+        x = self.init_conv(x)
         residuals = []
         
-        # Encoders
         for encoder in self.encoders:
-            x = encoder(x, t_embed, y_embed) # (bs, c_i, L) -> (bs, c_{i+1}, L // 2)
+            x = encoder(x, t_embed, y_embed)
             residuals.append(x.clone())
 
-        # Midcoder
         x = self.midcoder(x, t_embed, y_embed)
 
-        # Decoders
         for decoder in self.decoders:
-            res = residuals.pop() # (bs, c_i, L)
+            res = residuals.pop()
             x = x + res
-            x = decoder(x, t_embed, y_embed) # (bs, c_i, L) -> (bs, c_{i-1}, 2*L)
+            x = decoder(x, t_embed, y_embed)
 
-        # Final convolution
-        x = self.final_conv(x) # (bs, 1, L)
-
+        x = self.final_conv(x)
         return x
 
 if __name__ == "__main__":
@@ -418,11 +465,11 @@ if __name__ == "__main__":
     model = TUNet(
         channels = [32, 64, 128],
         num_residual_layers = 2,
-        t_embed_dim = 40,
-        y_embed_dim = 40,
+        cond_dim = 40,
+        num_classes = 10,  # For example, if you have 10 classes
     )
     x = torch.randn(4, 1, 628)  # (bs=4, channels=1, signal_length=628)
     t = torch.randn(4, 1, 1)    # (bs=4, 1, 1)
-    y = torch.randn(4, 1)       # (bs=4, 1)
+    y = torch.randint(0, 10, (4, 1))  # (bs=4, 1) with class indices
     out = model(x, t, y)
-    print(out.shape)  # Expected output shape: (4, 1, 628)    
+    print(out.shape)  # Expected output shape: (4, 1, 628)

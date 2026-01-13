@@ -76,7 +76,7 @@ class SineWaveSampler(nn.Module, Sampleable):
     """
     Sampleable sine wave generator with stochastic frequency, fixed phase and amplitude as classes
     """
-    def __init__(self, amplitudes: List[float] = [1.0, 2.0, 3.0], phase: float = 0.0, sample_rate: int = 100, duration: int = int(2 * torch.pi)):
+    def __init__(self, amplitudes: List[int] = [1, 2, 3], phase: float = 0.0, sample_rate: int = 100, duration: int = int(2 * torch.pi)):
         super().__init__()
         self.amplitudes = amplitudes
         self.phase = phase
@@ -153,9 +153,9 @@ def visualize_sinewave_samples(samples: torch.Tensor, labels: torch.Tensor):
     plt.tight_layout()
     plt.show()
 
-sampler = SineWaveSampler()
-samples, labels = sampler.sample(10)
-visualize_sinewave_samples(samples, labels)
+# sampler = SineWaveSampler()
+# samples, labels = sampler.sample(10)
+# visualize_sinewave_samples(samples, labels)
 
 class WaveSampler(nn.Module, Sampleable):
     '''
