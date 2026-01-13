@@ -74,7 +74,7 @@ def visualize_gaussian_cond_prob_path():
     plt.show()
 
 def visualize_sine_wave_path():
-    num_samples = 6
+    num_samples = 12
     num_timesteps = 5
 
     sampler = SineWaveSampler()
@@ -87,31 +87,50 @@ def visualize_sine_wave_path():
     ).to(device)
 
     z, labels = path.p_data.sample(num_samples) # z shape (num_samples, 1, signal_len), labels shape (num_samples, 1)
+    
+    # Get unique amplitude classes and group samples by class
+    unique_amplitudes = torch.unique(labels).cpu()
+    num_classes = len(unique_amplitudes)
+    
     ts = torch.linspace(0, 1, num_timesteps, device=device)
     t_axis = torch.linspace(0, sampler.duration, signal_length)
 
-    fig, axes = plt.subplots(num_samples, num_timesteps,
-                             figsize=(3 * num_timesteps, 1.6 * num_samples),
+    # Create subplots: one row per amplitude class
+    fig, axes = plt.subplots(num_classes, num_timesteps,
+                             figsize=(3 * num_timesteps, 2 * num_classes),
                              sharex=True, sharey=True)
-    axes = axes.reshape(num_samples, num_timesteps)
+    
+    # Handle case where there's only one class
+    if num_classes == 1:
+        axes = axes.reshape(1, -1)
 
-    for tidx, t in enumerate(ts):
-        tt = t.expand(num_samples, 1, 1) # shape (num_samples, 1, 1) broadcasts with z
-        xt = path.sample_conditional_path(z, tt).detach().cpu() # (num_samples, 1, signal_length)
-        xt = xt.squeeze(1)  # (num_samples, signal_length)
+    for class_idx, amplitude in enumerate(unique_amplitudes):
+        # Get all samples with this amplitude class
+        mask = (labels.squeeze() == amplitude)
+        class_z = z[mask]
+        class_labels = labels[mask]
+        num_class_samples = class_z.shape[0]
+        
+        for tidx, t in enumerate(ts):
+            tt = t.expand(num_class_samples, 1, 1) # shape (num_class_samples, 1, 1)
+            xt = path.sample_conditional_path(class_z, tt).detach().cpu() # (num_class_samples, 1, signal_length)
+            xt = xt.squeeze(1)  # (num_class_samples, signal_length)
 
-        for sidx in range(num_samples):
-            ax = axes[sidx, tidx]
-            ax.plot(t_axis.cpu(), xt[sidx])
-            if sidx == 0:
+            ax = axes[class_idx, tidx]
+            
+            # Plot all samples in this class
+            for sidx in range(num_class_samples):
+                ax.plot(t_axis.cpu(), xt[sidx], alpha=0.7)
+            
+            if class_idx == 0:
                 ax.set_title(f"t={float(t):.2f}", fontsize=10)
             if tidx == 0:
-                freq = labels[sidx].item()
-                ax.set_ylabel(f"f={freq:.3f}", fontsize=8)
+                ax.set_ylabel(f"Amp={amplitude:.1f}", fontsize=10, fontweight='bold')
             ax.set_xticks([])
             ax.set_yticks([])
+            ax.grid(True, alpha=0.3)
 
-    fig.suptitle("Gaussian conditional path for sine waves", fontsize=14)
+    fig.suptitle("Gaussian conditional path for sine waves (grouped by amplitude class)", fontsize=14)
     plt.tight_layout()
     plt.show()
 
