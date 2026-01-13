@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from tqdm import tqdm
 
 import torch
+import matplotlib.pyplot as plt
 from torch import nn
 from utility import model_size_b, MiB
 
@@ -20,7 +21,7 @@ class Trainer(ABC):
     def get_optimizer(self, lr: float):
         return torch.optim.Adam(self.model.parameters(), lr=lr)
 
-    def train(self, num_epochs: int, device: torch.device, lr: float = 1e-3, **kwargs) -> torch.Tensor:
+    def train(self, num_epochs: int, device: torch.device, lr: float = 1e-3, path: str = "training_loss.png", **kwargs) -> torch.Tensor:
         # Report model size
         size_b = model_size_b(self.model)
         print(f'Training model with size: {size_b / MiB:.3f} MiB')
@@ -29,15 +30,20 @@ class Trainer(ABC):
         self.model.to(device)
         opt = self.get_optimizer(lr)
         self.model.train()
+        losses = []
 
         # Train loop
         pbar = tqdm(enumerate(range(num_epochs)))
         for idx, epoch in pbar:
             opt.zero_grad()
             loss = self.get_train_loss(**kwargs)
+            losses.append(loss.item())
             loss.backward()
             opt.step()
             pbar.set_description(f'Epoch {idx}, loss: {loss.item():.3f}')
+            plt.plot(losses)
+            plt.yscale('log')
+            plt.savefig(path)
 
         # Finish
         self.model.eval()

@@ -412,3 +412,17 @@ class TUNet(ConditionalVectorField):
         x = self.final_conv(x) # (bs, 1, L)
 
         return x
+
+if __name__ == "__main__":
+    # Test TUNet
+    model = TUNet(
+        channels = [32, 64, 128],
+        num_residual_layers = 2,
+        t_embed_dim = 40,
+        y_embed_dim = 40,
+    )
+    x = torch.randn(4, 1, 628)  # (bs=4, channels=1, signal_length=628)
+    t = torch.randn(4, 1, 1)    # (bs=4, 1, 1)
+    y = torch.randn(4, 1)       # (bs=4, 1)
+    out = model(x, t, y)
+    print(out.shape)  # Expected output shape: (4, 1, 628)    

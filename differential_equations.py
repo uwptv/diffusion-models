@@ -71,6 +71,7 @@ class CFGVectorFieldODE(ODE):
         - y: (bs,)
         """
         guided_vector_field = self.net(x, t, y)
+        print(guided_vector_field.shape)
         unguided_y = torch.ones_like(y) * 10
         unguided_vector_field = self.net(x, t, unguided_y)
         return (1 - self.guidance_scale) * unguided_vector_field + self.guidance_scale * guided_vector_field
