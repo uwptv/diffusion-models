@@ -74,50 +74,88 @@ class MNISTSampler(nn.Module, Sampleable):
     
 class SineWaveSampler(nn.Module, Sampleable):
     """
-    Sampleable sine wave generator with stochastic frequency, fixed amplitude and phase
+    Sampleable sine wave generator with stochastic frequency, fixed phase and amplitude as classes
     """
-    def __init__(self, amplitude: float = 1.0, phase: float = 0.0, sample_rate: int = 100, duration: int = int(2 * torch.pi)):
+    def __init__(self, amplitudes: List[float] = [1.0, 2.0, 3.0], phase: float = 0.0, sample_rate: int = 100, duration: int = int(2 * torch.pi)):
         super().__init__()
-        self.amplitude = amplitude
+        self.amplitudes = amplitudes
         self.phase = phase
         self.sample_rate = sample_rate
         self.duration = duration
         self.dummy = nn.Buffer(torch.zeros(1)) # Will automatically be moved when self.to(...) is called...
 
-    def sample(self, num_samples: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def sample(self, num_samples: int, mean: float = 1.0, std: float = 0.5) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
             - num_samples: the desired number of samples
+            - mean: mean of the normal distribution for frequencies
+            - std: standard deviation of the normal distribution for frequencies
         Returns:
             - samples: shape (num_samples, channels = 1, signal_length = sample_rate * duration)
-            - labels: shape (num_samples, 1) containing frequency
+            - labels: shape (num_samples, 1) containing amplitude as class
         """
+        num_classes = len(self.amplitudes)
+        amplitudes_tensor = torch.tensor(self.amplitudes, device=self.dummy.device)  # Convert to tensor
         t = torch.linspace(0, self.duration, self.sample_rate * self.duration, device=self.dummy.device) # (signal_length,)
-        frequencies = torch.rand(num_samples, 1, device=self.dummy.device)  # random frequencies with shape (num_samples, 1)
-
+        class_indices = torch.randint(0, num_classes, (num_samples,), device=self.dummy.device)  # (num_samples,)
+        
+        # Generate frequencies from normal distribution and ensure they're positive
+        frequencies = torch.randn(num_samples, device=self.dummy.device) * std + mean  # (num_samples,)
+        frequencies = torch.clamp(frequencies, min=1e-6)  # Ensure all frequencies are > 0
+        
         # Vectorized sine wave generation
-        waves = self.amplitude * torch.sin(2 * torch.pi * frequencies * t + self.phase) # (num_samples, signal_length)
+        # frequencies: (num_samples,) -> (num_samples, 1) for broadcasting
+        # t: (signal_length,)
+        # Result: (num_samples, signal_length)
+        waves = amplitudes_tensor[class_indices].unsqueeze(1) * torch.sin(2 * torch.pi * frequencies.unsqueeze(1) * t + self.phase)
         waves = waves.unsqueeze(1)  # reshape to (num_samples, 1, signal_length) for backbone
+        labels = amplitudes_tensor[class_indices].unsqueeze(1)  # (num_samples, 1)
 
-        return waves, frequencies
+        return waves, labels
     
 def visualize_sinewave_samples(samples: torch.Tensor, labels: torch.Tensor):
+    """
+    Visualize sine wave samples grouped by amplitude class.
+    
+    Args:
+        - samples: shape (num_samples, channels = 1, signal_length)
+        - labels: shape (num_samples, 1) containing amplitude values
+    """
     t = torch.linspace(0, int(2 * torch.pi), samples.shape[-1])
-    plt.figure(figsize=(10, 6))
-    for i in range(samples.shape[0]):
-        freq = labels[i].item()
-        plt.plot(t.cpu(), samples[i, 0].cpu(),
-                 label=f'f={freq:.3f} Hz')
-    plt.title('Sine Wave Samples')
-    plt.xlabel('Time')
-    plt.ylabel('Amplitude')
-    plt.legend()
-    plt.grid()
+    
+    # Get unique amplitude classes
+    unique_amplitudes = torch.unique(labels).cpu().numpy()
+    num_classes = len(unique_amplitudes)
+    
+    # Create subplots, one for each amplitude class
+    fig, axes = plt.subplots(num_classes, 1, figsize=(10, 4 * num_classes))
+    
+    # Handle case where there's only one class (axes won't be an array)
+    if num_classes == 1:
+        axes = [axes]
+    
+    for class_idx, amplitude in enumerate(unique_amplitudes):
+        # Find all samples with this amplitude class
+        mask = (labels.squeeze() == amplitude)
+        class_samples = samples[mask]
+        
+        # Plot all samples in this class
+        for i in range(class_samples.shape[0]):
+            axes[class_idx].plot(t.cpu(), class_samples[i, 0].cpu(), 
+                               alpha=0.7, label=f'Sample {i+1}')
+        
+        axes[class_idx].set_title(f'Amplitude: {amplitude:.1f}')
+        axes[class_idx].set_xlabel('Time')
+        axes[class_idx].set_ylabel('Signal Value')
+        axes[class_idx].legend(loc='upper right', fontsize='small')
+        axes[class_idx].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
     plt.show()
 
-# sampler = SineWaveSampler()
-# samples, labels = sampler.sample(10)
-# visualize_sinewave_samples(samples, labels)
+sampler = SineWaveSampler()
+samples, labels = sampler.sample(10)
+visualize_sinewave_samples(samples, labels)
 
 class WaveSampler(nn.Module, Sampleable):
     '''
