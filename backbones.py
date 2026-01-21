@@ -272,12 +272,12 @@ class ResidualLayer1D(nn.Module):
         super().__init__()
         self.block1 = nn.Sequential(
             nn.SiLU(),
-            # nn.BatchNorm1d(channels),
+            nn.BatchNorm1d(channels),
             nn.Conv1d(channels, channels, kernel_size=3, padding=1)
         )
         self.block2 = nn.Sequential(
             nn.SiLU(),
-            # nn.BatchNorm1d(channels),
+            nn.BatchNorm1d(channels),
             nn.Conv1d(channels, channels, kernel_size=3, padding=1)
         )
         # Converts (bs, cond_dim) -> (bs, channels)
@@ -388,7 +388,7 @@ class TUNet(ConditionalVectorField):
         
         self.init_conv = nn.Sequential(
             nn.Conv1d(input_channels, channels[0], kernel_size=3, padding=1),
-            # nn.BatchNorm1d(channels[0]),
+            nn.BatchNorm1d(channels[0]),
             nn.SiLU()
         )
 
