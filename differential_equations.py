@@ -63,7 +63,7 @@ class CFGVectorFieldODE(ODE):
         self.net = net
         self.guidance_scale = guidance_scale
 
-    def drift_coefficient(self, x: torch.Tensor, t: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    def drift_coefficient(self, x: torch.Tensor, t: torch.Tensor, y: torch.Tensor, null_class: int = 0) -> torch.Tensor:
         """
         Args:
         - x: (bs, c, h, w)
@@ -71,6 +71,6 @@ class CFGVectorFieldODE(ODE):
         - y: (bs,)
         """
         guided_vector_field = self.net(x, t, y)
-        unguided_y = torch.ones_like(y) * 3
+        unguided_y = torch.ones_like(y) * null_class
         unguided_vector_field = self.net(x, t, unguided_y)
         return (1 - self.guidance_scale) * unguided_vector_field + self.guidance_scale * guided_vector_field
