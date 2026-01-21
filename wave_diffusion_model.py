@@ -21,13 +21,13 @@ path = GaussianConditionalProbabilityPath(
 tunet = TUNet(
     channels = [32, 64, 128],
     num_residual_layers = 2,
-    t_embed_dim = 40,
-    y_embed_dim = 40,
-    input_channels = 3
+    cond_dim=64,
+    num_classes=3,
+    input_channels=3
     )
 
 trainer = WaveTrainer(path = path, model = tunet, eta=0.1)
-trainer.train(num_epochs = 1000, device=device, lr=1e-3, batch_size=250)
+trainer.train(num_epochs = 2000, device=device, lr=1e-3, batch_size=250)
 
-# visualize_generated_waves(model=tunet, guidance_scales=(1.0, 3.0, 5.0))
+visualize_generated_waves(model=tunet, guidance_scales=(1.0, 2.0, 4.0))
 # does not seem to work that well :(

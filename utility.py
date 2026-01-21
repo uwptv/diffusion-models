@@ -135,7 +135,7 @@ def visualize_sine_wave_path():
     plt.show()
 
 def visualize_wave_path():
-    num_samples = 6
+    num_samples = 5
     num_timesteps = 5
 
     sampler = WaveSampler()
@@ -148,31 +148,52 @@ def visualize_wave_path():
     ).to(device)
 
     z, labels = path.p_data.sample(num_samples) # z shape (num_samples, 3, signal_len), labels shape (num_samples, 1)
+    
+    # Get unique amplitude classes and group samples by class
+    unique_amplitudes = torch.unique(labels).cpu()
+    num_classes = len(unique_amplitudes)
+    
     ts = torch.linspace(0, 1, num_timesteps, device=device)
     t_axis = torch.linspace(0, sampler.duration, signal_length)
+    wave_types = ['Sine', 'Sawtooth', 'Square']
 
-    fig, axes = plt.subplots(num_samples, num_timesteps,
-                             figsize=(3 * num_timesteps, 1.6 * num_samples),
-                             sharex=True, sharey=True)
-    axes = axes.reshape(num_samples, num_timesteps)
+    # Create subplots: 3 channels × num_classes rows, num_timesteps columns
+    fig, axes = plt.subplots(3 * num_classes, num_timesteps,
+                             figsize=(3 * num_timesteps, 2 * 3 * num_classes),
+                             sharex=True, sharey='row')
+    
+    axes = axes.reshape(3 * num_classes, num_timesteps)
 
-    for tidx, t in enumerate(ts):
-        tt = t.expand(num_samples, 1, 1) # shape (num_samples, 1, 1) broadcasts with z
-        xt = path.sample_conditional_path(z, tt).detach().cpu() # (num_samples, 3, signal_length)
+    for class_idx, amplitude in enumerate(unique_amplitudes):
+        # Get all samples with this amplitude class
+        mask = (labels.squeeze() == amplitude)
+        class_z = z[mask]
+        num_class_samples = class_z.shape[0]
+        
+        for channel in range(3):
+            row_idx = class_idx * 3 + channel
+            
+            for tidx, t in enumerate(ts):
+                tt = t.expand(num_class_samples, 1, 1) # shape (num_class_samples, 1, 1)
+                xt = path.sample_conditional_path(class_z, tt).detach().cpu() # (num_class_samples, 3, signal_length)
 
-        for sidx in range(num_samples):
-            ax = axes[sidx, tidx]
-            for channel in range(3):
-                ax.plot(t_axis.cpu(), xt[sidx, channel], alpha=0.7)
-            if sidx == 0:
-                ax.set_title(f"t={float(t):.2f}", fontsize=10)
-            if tidx == 0:
-                freq = labels[sidx].item()
-                ax.set_ylabel(f"f={freq:.3f}", fontsize=8)
-            ax.set_xticks([])
-            ax.set_yticks([])
+                ax = axes[row_idx, tidx]
+                
+                # Plot all samples for this channel
+                for sidx in range(num_class_samples):
+                    ax.plot(t_axis.cpu(), xt[sidx, channel], alpha=0.7)
+                
+                # Titles and labels
+                if row_idx == 0:
+                    ax.set_title(f"t={float(t):.2f}", fontsize=10)
+                if tidx == 0:
+                    ax.set_ylabel(f"{wave_types[channel]}\nAmp={amplitude:.1f}", 
+                                 fontsize=9, fontweight='bold')
+                ax.set_xticks([])
+                ax.set_yticks([])
+                ax.grid(True, alpha=0.3)
 
-    fig.suptitle("Gaussian conditional path for waves", fontsize=14)
+    fig.suptitle("Gaussian conditional path for waves by channel and amplitude", fontsize=14)
     plt.tight_layout()
     plt.show()
 
@@ -275,47 +296,75 @@ def visualize_generated_sine_waves(model: ConditionalVectorField,
     plt.show()
 
 def visualize_generated_waves(model: ConditionalVectorField,
-                             num_freqs: int = 5,
-                             samples_per_freq: int = 1,
+                             samples_per_amplitude: int = 1,
                              num_timesteps: int = 100,
                              guidance_scales = (1.0,)):
     """
-    Sample random frequencies, generate waves via the trained model, and plot them.
+    Generate waves per amplitude class via the trained model, showing each channel separately.
+    
+    Args:
+        - model: trained conditional vector field model
+        - samples_per_amplitude: number of samples to generate per amplitude class
+        - num_timesteps: number of time steps for ODE simulation
+        - guidance_scales: tuple of guidance scale values to test
     """
     model.eval()
 
-    # Infer signal length from the wave sampler defaults (keeps consistent with training)
+    # Infer signal length and amplitude classes from the wave sampler
     sampler = WaveSampler()
     signal_length = sampler.sample_rate * sampler.duration
     t_axis = torch.linspace(0, sampler.duration, signal_length, device=device)
+    amplitudes = sampler.amplitudes  # e.g., [1, 2, 3]
+    num_classes = len(amplitudes)
+    wave_types = ['Sine', 'Sawtooth', 'Square']
+    
+    # Use actual amplitude values: [1, 1, 2, 2, 3, 3, ...]
+    amplitude_values = torch.tensor(amplitudes, dtype=torch.long, device=device).repeat_interleave(samples_per_amplitude)
+    num_samples = amplitude_values.shape[0]
 
-    # Random frequencies in [0, 1]; repeat for multiple samples per frequency
-    base_freqs = torch.rand(num_freqs, 1, device=device)                # (num_freqs, 1)
-    frequencies = base_freqs.repeat_interleave(samples_per_freq, dim=0) # (num_samples, 1)
-    num_samples = frequencies.shape[0]
-
-    # Initial noise and time discretization (shape-safe for 1D)
+    # Initial noise and time discretization
     x0 = torch.randn(num_samples, 3, signal_length, device=device)      # (bs, 3, L)
     ts = torch.linspace(0, 1, num_timesteps, device=device)             # (nts,)
     ts = ts.view(1, -1, 1, 1).expand(num_samples, -1, 1, 1)             # (bs, nts, 1, 1)
 
-    fig, axes = plt.subplots(1, len(guidance_scales), figsize=(10 * len(guidance_scales), 6))
-    if len(guidance_scales) == 1:
-        axes = [axes]
+    # Create subplots: rows = 3 channels × num_classes, cols = guidance scales
+    fig, axes = plt.subplots(3 * num_classes, len(guidance_scales),
+                            figsize=(8 * len(guidance_scales), 2 * 3 * num_classes),
+                            squeeze=False, sharex=True, sharey='row')
 
     with torch.no_grad():
-        for ax, w in zip(axes, guidance_scales):
+        for col_idx, w in enumerate(guidance_scales):
             ode = CFGVectorFieldODE(model, guidance_scale=float(w))
             simulator = EulerSimulator(ode)
-            x1 = simulator.simulate(x0.clone(), ts, y=frequencies)      # (bs, 3, L)
+            x1 = simulator.simulate(x0.clone(), ts, y=amplitude_values)  # (bs, 3, L)
 
-            for sidx in range(num_samples):
+            # Plot samples grouped by amplitude class and channel
+            for class_idx, amplitude in enumerate(amplitudes):
                 for channel in range(3):
-                    ax.plot(t_axis.cpu(), x1[sidx, channel].detach().cpu(), alpha=0.7)
+                    row_idx = class_idx * 3 + channel
+                    ax = axes[row_idx, col_idx]
+                    
+                    # Get indices for this amplitude class
+                    start_idx = class_idx * samples_per_amplitude
+                    end_idx = start_idx + samples_per_amplitude
+                    
+                    # Plot all samples in this amplitude class for this channel
+                    for sample_idx in range(start_idx, end_idx):
+                        ax.plot(t_axis.cpu(), x1[sample_idx, channel].detach().cpu(), 
+                               alpha=0.7, label=f'Sample {sample_idx - start_idx + 1}')
 
-            ax.set_title(f"Guidance: w={float(w):.1f}", fontsize=14)
-            ax.set_xlabel("Time")
-            ax.set_ylabel("Amplitude")
+                    # Set titles and labels
+                    if row_idx == 0:
+                        ax.set_title(f"Guidance: w={float(w):.1f}", fontsize=14, fontweight='bold')
+                    if col_idx == 0:
+                        ax.set_ylabel(f"{wave_types[channel]}\nAmp={amplitude}", 
+                                     fontsize=10, fontweight='bold')
+                    
+                    ax.set_xlabel("Time")
+                    if samples_per_amplitude > 1:
+                        ax.legend(loc='upper right', fontsize='small')
+                    ax.grid(True, alpha=0.3)
 
+    fig.suptitle("Generated Waves by Channel and Amplitude Class", fontsize=16, fontweight='bold')
     plt.tight_layout()
     plt.show()

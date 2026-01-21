@@ -159,59 +159,86 @@ def visualize_sinewave_samples(samples: torch.Tensor, labels: torch.Tensor):
 
 class WaveSampler(nn.Module, Sampleable):
     '''
-    Distribution which samples sine waves, cosine waves and sawtooth waves with stochastic frequency, fixed amplitude and phase in 3 different channels
+    Sampleable wave generator with stochastic frequency and amplitude as classes.
+    Generates 3 channels: sine waves, sawtooth waves, and square waves.
     '''
-    def __init__(self, amplitude: float = 1.0, phase: float = 0.0, sample_rate: int = 100, duration: int = int(2 * torch.pi)):
+    def __init__(self, amplitudes: List[int] = [1, 2, 3], phase: float = 0.0, sample_rate: int = 100, duration: int = int(2 * torch.pi)):
         super().__init__()
-        self.amplitude = amplitude
+        self.amplitudes = amplitudes
         self.phase = phase
         self.sample_rate = sample_rate
         self.duration = duration
-        self.dummy = nn.Buffer(torch.zeros(1)) # Will automatically be moved when self.to(...) is called...
+        self.dummy = nn.Buffer(torch.zeros(1))
 
-    def sample(self, num_samples: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def sample(self, num_samples: int, mean: float = 1.0, std: float = 0.5) -> Tuple[torch.Tensor, torch.Tensor]:
         '''
         Args:
             - num_samples: the desired number of samples
+            - mean: mean of the normal distribution for frequencies
+            - std: standard deviation of the normal distribution for frequencies
         Returns:
-            - samples: (num_samples, channels = 3, signal_length = sample_rate * duration)
-            - labels: (num_samples, 1) containing frequency
+            - samples: (num_samples, channels=3, signal_length)
+            - labels: (num_samples, 1) containing amplitude class
         '''
-        t = torch.linspace(0, self.duration, self.sample_rate * self.duration, device=self.dummy.device) # (signal_length,)
-        frequencies = torch.rand(num_samples, 1, device=self.dummy.device)  # random frequencies with shape (num_samples, 1)
+        num_classes = len(self.amplitudes)
+        amplitudes_tensor = torch.tensor(self.amplitudes, device=self.dummy.device)
+        t = torch.linspace(0, self.duration, self.sample_rate * self.duration, device=self.dummy.device)
+        class_indices = torch.randint(0, num_classes, (num_samples,), device=self.dummy.device)
+        
+        # Generate frequencies from normal distribution and ensure they're positive
+        frequencies = torch.randn(num_samples, device=self.dummy.device) * std + mean
+        frequencies = torch.clamp(frequencies, min=1e-6)
+        
+        # Get amplitudes for each sample
+        amps = amplitudes_tensor[class_indices].unsqueeze(1)  # (num_samples, 1)
+        freqs = frequencies.unsqueeze(1)  # (num_samples, 1)
+        
+        # Channel 0: Sine waves
+        sine_waves = amps * torch.sin(2 * torch.pi * freqs * t + self.phase)  # (num_samples, signal_length)
+        
+        # Channel 1: Sawtooth waves
+        sawtooth_waves = amps * (2 * (freqs * t - torch.floor(0.5 + freqs * t)))  # (num_samples, signal_length)
+        
+        # Channel 2: Square waves
+        square_waves = amps * torch.sign(torch.sin(2 * torch.pi * freqs * t + self.phase))  # (num_samples, signal_length)
+        
+        # Stack channels: (num_samples, 3, signal_length)
+        waves = torch.stack([sine_waves, sawtooth_waves, square_waves], dim=1)
+        
+        labels = amplitudes_tensor[class_indices].unsqueeze(1)  # (num_samples, 1)
+        
+        return waves, labels
 
-        # Vectorized sine wave generation
-        sine_waves = self.amplitude * torch.sin(2 * torch.pi * frequencies * t + self.phase) # (num_samples, signal_length)
-        sine_waves = sine_waves.unsqueeze(1)  # reshape to (num_samples, 1, signal_length) for backbone
-
-        # Vectorized cosine wave generation
-        cosine_waves = self.amplitude * torch.cos(2 * torch.pi * frequencies * t + self.phase) # (num_samples, signal_length)
-        cosine_waves = cosine_waves.unsqueeze(1)  # reshape to (num_samples, 1, signal_length) for backbone
-
-        # Vectorized sawtooth wave generation
-        sawtooth_waves = self.amplitude * (2 * (frequencies * t - torch.floor(0.5 + frequencies * t)))  # (num_samples, signal_length)
-        sawtooth_waves = sawtooth_waves.unsqueeze(1)  # reshape
-
-        # Concatenate all three channels
-        waves = torch.cat([sine_waves, cosine_waves, sawtooth_waves], dim=1)  # (num_samples, 3, signal_length)
-
-        return waves, frequencies
-    
 def visualize_wave_samples(samples: torch.Tensor, labels: torch.Tensor):
     t = torch.linspace(0, int(2 * torch.pi), samples.shape[-1])
-    fig, axes = plt.subplots(3, 1, figsize=(10, 10))
-    wave_types = ['Sine', 'Cosine', 'Sawtooth']
+    wave_types = ['Sine', 'Sawtooth', 'Square']
+    
+    # Get unique amplitude classes
+    unique_amplitudes = torch.unique(labels).cpu().numpy()
+    num_classes = len(unique_amplitudes)
+    
+    # Create subplots: 3 rows (one per wave type)
+    fig, axes = plt.subplots(3, 1, figsize=(12, 10))
     
     for wave_idx in range(3):
-        for i in range(samples.shape[0]):
-            freq = labels[i].item()
-            axes[wave_idx].plot(t.cpu(), samples[i, wave_idx].cpu(), 
-                               label=f'{wave_types[wave_idx]} f={freq:.3f} Hz')
-        axes[wave_idx].set_title(f'{wave_types[wave_idx]} Waves')
+        for class_idx, amplitude in enumerate(unique_amplitudes):
+            # Find samples with this amplitude
+            mask = (labels.squeeze() == amplitude)
+            class_samples = samples[mask]
+            
+            # Plot samples from this class
+            for i in range(class_samples.shape[0]):
+                axes[wave_idx].plot(t.cpu(), class_samples[i, wave_idx].cpu(), 
+                                   alpha=0.6, label=f'Amp={amplitude:.1f}')
+        
+        axes[wave_idx].set_title(f'{wave_types[wave_idx]} Waves', fontsize=12, fontweight='bold')
         axes[wave_idx].set_xlabel('Time')
         axes[wave_idx].set_ylabel('Amplitude')
-        axes[wave_idx].legend()
-        axes[wave_idx].grid()
+        axes[wave_idx].grid(True, alpha=0.3)
+        # Remove duplicate legend entries
+        handles, labels_legend = axes[wave_idx].get_legend_handles_labels()
+        by_label = dict(zip(labels_legend, handles))
+        axes[wave_idx].legend(by_label.values(), by_label.keys(), loc='upper right')
     
     plt.tight_layout()
     plt.show()
