@@ -227,9 +227,9 @@ def visualize_generated_sine_waves(model: ConditionalVectorField,
     amplitudes = sampler.amplitudes  # e.g., [1, 2, 3]
     num_classes = len(amplitudes)
     
-    # Create CLASS INDEX labels: [0, 0, 0, 1, 1, 1, 2, 2, 2, ...]
-    class_indices = torch.arange(num_classes, device=device).repeat_interleave(samples_per_amplitude)  # (num_samples,)
-    num_samples = class_indices.shape[0]
+    # Use actual amplitude values: [1, 1, 1, 2, 2, 2, 3, 3, 3, ...]
+    amplitude_values = torch.tensor(amplitudes, dtype=torch.long, device=device).repeat_interleave(samples_per_amplitude)
+    num_samples = amplitude_values.shape[0]
 
     # Initial noise and time discretization
     x0 = torch.randn(num_samples, 1, signal_length, device=device)      # (bs, 1, L)
@@ -245,7 +245,7 @@ def visualize_generated_sine_waves(model: ConditionalVectorField,
         for col_idx, w in enumerate(guidance_scales):
             ode = CFGVectorFieldODE(model, guidance_scale=float(w))
             simulator = EulerSimulator(ode)
-            x1 = simulator.simulate(x0.clone(), ts, y=class_indices)  # (bs, 1, L)
+            x1 = simulator.simulate(x0.clone(), ts, y=amplitude_values)  # (bs, 1, L)
 
             # Plot samples grouped by amplitude class
             for class_idx, amplitude in enumerate(amplitudes):
