@@ -37,13 +37,15 @@ class Trainer(ABC):
         for idx, epoch in pbar:
             opt.zero_grad()
             loss = self.get_train_loss(**kwargs)
-            losses.append(loss.item())
             loss.backward()
             opt.step()
             pbar.set_description(f'Epoch {idx}, loss: {loss.item():.3f}')
-            plt.plot(losses)
-            plt.yscale('log')
-            plt.savefig(path)
+            if idx % 10 == 0:  # Plot every 10 iterations
+                plt.clf()  # Clear figure to prevent memory buildup
+                plt.plot(losses)
+                plt.yscale('log')
+                plt.savefig(path)
+                plt.close()
 
         # Finish
         self.model.eval()
