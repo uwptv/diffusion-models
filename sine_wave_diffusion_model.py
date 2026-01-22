@@ -1,7 +1,7 @@
 import torch
 from probability_paths import GaussianConditionalProbabilityPath, LinearAlpha, LinearBeta
 from distributions import SineWaveSampler
-from backbones import TUNet
+from backbones import StandardUNet
 from trainers import SineWaveTrainer
 from utility import visualize_generated_sine_waves, visualize_sine_wave_path
 
@@ -18,7 +18,7 @@ path = GaussianConditionalProbabilityPath(
 # visualize_sine_wave_path()
 
 # Initialize model for sine wave generation
-tunet = TUNet(
+tunet = StandardUNet(
     channels = [32, 64, 128],
     num_residual_layers = 2,
     cond_dim=64,
