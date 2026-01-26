@@ -4,7 +4,7 @@ from torchvision.utils import make_grid
 
 from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath, ConditionalProbabilityPath
 from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
-from diffusion_models.data.mnist import MNISTSampler
+from diffusion_models.data.synthetic import MNISTSampler
 from diffusion_models.data.synthetic import SineWaveSampler, WaveSampler
 from diffusion_models.dynamics.base import CFGVectorFieldODE, ConditionalVectorField
 from diffusion_models.dynamics.simulators import EulerSimulator
