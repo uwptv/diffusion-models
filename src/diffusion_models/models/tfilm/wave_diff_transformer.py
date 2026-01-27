@@ -1,6 +1,6 @@
 import torch
 
-from diffusion_models.architectures.tfilm_unet import TFiLMUNet
+from diffusion_models.architectures.tfilm_unet import TFiLMUNetTransformer
 from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath
 from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
 from diffusion_models.data.synthetic import WaveSampler
@@ -18,7 +18,7 @@ path = GaussianConditionalProbabilityPath(
 ).to(device)
 
 # initialize model
-net = TFiLMUNet(
+net = TFiLMUNetTransformer(
     channels = [32, 64, 128],
     num_residual_layers = 2,
     cond_dim=64,
@@ -31,4 +31,4 @@ trainer = CFGTrainer(path = path, model = net, eta=0.1, null_label=0)
 trainer.train(num_epochs = 2000, device=device, lr=1e-3, batch_size=250)
 
 # visualize generated waves
-# visualize_generated_waves(model=net, guidance_scales=(1.0, 2.0, 4.0))
+visualize_generated_waves(model=net, guidance_scales=(1.0, 2.0, 4.0))

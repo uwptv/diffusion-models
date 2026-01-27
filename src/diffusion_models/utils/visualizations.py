@@ -4,7 +4,7 @@ from torchvision.utils import make_grid
 
 from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath, ConditionalProbabilityPath
 from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
-from diffusion_models.data.synthetic import MNISTSampler
+from diffusion_models.data.loaders import MNISTSampler
 from diffusion_models.data.synthetic import SineWaveSampler, WaveSampler
 from diffusion_models.dynamics.base import CFGVectorFieldODE, ConditionalVectorField
 from diffusion_models.dynamics.simulators import EulerSimulator
@@ -169,7 +169,7 @@ def visualize_wave_path():
     plt.tight_layout()
     plt.show()
 
-def visualize_generated_mnist_samples(path: ConditionalProbabilityPath, model: ConditionalVectorField):
+def visualize_generated_mnist_samples(path: ConditionalProbabilityPath, model: ConditionalVectorField, null_class: int = 0):
     samples_per_class = 10
     num_timesteps = 100
     guidance_scales = [1.0, 3.0, 5.0]
@@ -189,7 +189,7 @@ def visualize_generated_mnist_samples(path: ConditionalProbabilityPath, model: C
 
         # Simulate
         ts = torch.linspace(0,1,num_timesteps).view(1, -1, 1, 1, 1).expand(num_samples, -1, 1, 1, 1).to(device)
-        x1 = simulator.simulate(x0, ts, y=y)
+        x1 = simulator.simulate(x0, ts, y=y, null_class=null_class)
 
         # Plot
         grid = make_grid(x1, nrow=samples_per_class, normalize=True, value_range=(-1,1))
@@ -201,7 +201,8 @@ def visualize_generated_mnist_samples(path: ConditionalProbabilityPath, model: C
 def visualize_generated_sine_waves(model: ConditionalVectorField,
                                    samples_per_amplitude: int = 3,
                                    num_timesteps: int = 100,
-                                   guidance_scales = (1.0,)):
+                                   guidance_scales = (1.0,),
+                                   null_class: int = 0):
     """
     Generate sine waves per amplitude class via the trained model, and plot them grouped by amplitude.
     
@@ -210,6 +211,7 @@ def visualize_generated_sine_waves(model: ConditionalVectorField,
         - samples_per_amplitude: number of samples to generate per amplitude class
         - num_timesteps: number of time steps for ODE simulation
         - guidance_scales: tuple of guidance scale values to test
+        - null_class: the null class label for classifier-free guidance
     """
     model.eval()
 
@@ -238,7 +240,7 @@ def visualize_generated_sine_waves(model: ConditionalVectorField,
         for col_idx, w in enumerate(guidance_scales):
             ode = CFGVectorFieldODE(model, guidance_scale=float(w))
             simulator = EulerSimulator(ode)
-            x1 = simulator.simulate(x0.clone(), ts, y=amplitude_values)  # (bs, 1, L)
+            x1 = simulator.simulate(x0.clone(), ts, y=amplitude_values, null_class=null_class)  # (bs, 1, L)
 
             # Plot samples grouped by amplitude class
             for class_idx, amplitude in enumerate(amplitudes):
@@ -270,7 +272,8 @@ def visualize_generated_sine_waves(model: ConditionalVectorField,
 def visualize_generated_waves(model: ConditionalVectorField,
                              samples_per_amplitude: int = 1,
                              num_timesteps: int = 100,
-                             guidance_scales = (1.0,)):
+                             guidance_scales = (1.0,),
+                             null_class: int = 0):
     """
     Generate waves per amplitude class via the trained model, showing each channel separately.
     
@@ -279,6 +282,7 @@ def visualize_generated_waves(model: ConditionalVectorField,
         - samples_per_amplitude: number of samples to generate per amplitude class
         - num_timesteps: number of time steps for ODE simulation
         - guidance_scales: tuple of guidance scale values to test
+        - null_class: the null class label for classifier-free guidance
     """
     model.eval()
 
@@ -308,7 +312,7 @@ def visualize_generated_waves(model: ConditionalVectorField,
         for col_idx, w in enumerate(guidance_scales):
             ode = CFGVectorFieldODE(model, guidance_scale=float(w))
             simulator = EulerSimulator(ode)
-            x1 = simulator.simulate(x0.clone(), ts, y=amplitude_values)  # (bs, 3, L)
+            x1 = simulator.simulate(x0.clone(), ts, y=amplitude_values, null_class=null_class)  # (bs, 3, L)
 
             # Plot samples grouped by amplitude class and channel
             for class_idx, amplitude in enumerate(amplitudes):
