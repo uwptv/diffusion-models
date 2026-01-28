@@ -1,24 +1,27 @@
 import torch
 import torch.nn as nn
 
+
 class ResidualLayer1D(nn.Module):
-    def __init__(self, channels: int, cond_dim: int,):
+    def __init__(
+        self,
+        channels: int,
+        cond_dim: int,
+    ):
         super().__init__()
         self.block1 = nn.Sequential(
             nn.SiLU(),
             nn.BatchNorm1d(channels),
-            nn.Conv1d(channels, channels, kernel_size=3, padding=1)
+            nn.Conv1d(channels, channels, kernel_size=3, padding=1),
         )
         self.block2 = nn.Sequential(
             nn.SiLU(),
             nn.BatchNorm1d(channels),
-            nn.Conv1d(channels, channels, kernel_size=3, padding=1)
+            nn.Conv1d(channels, channels, kernel_size=3, padding=1),
         )
         # Converts (bs, cond_dim) -> (bs, channels)
         self.cond_adapter = nn.Sequential(
-            nn.Linear(cond_dim, cond_dim),
-            nn.SiLU(),
-            nn.Linear(cond_dim, channels)
+            nn.Linear(cond_dim, cond_dim), nn.SiLU(), nn.Linear(cond_dim, channels)
         )
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
@@ -27,30 +30,39 @@ class ResidualLayer1D(nn.Module):
         - x: (bs, c, L)
         - cond: (bs, cond_dim)
         """
-        res = x.clone() # (bs, c, L)
+        res = x.clone()  # (bs, c, L)
 
         # Initial conv block
-        x = self.block1(x) # (bs, c, L)
+        x = self.block1(x)  # (bs, c, L)
 
         # Add conditioning embedding
-        cond = self.cond_adapter(cond).unsqueeze(-1) # (bs, c, 1)
+        cond = self.cond_adapter(cond).unsqueeze(-1)  # (bs, c, 1)
         x = x + cond
 
         # Second conv block
-        x = self.block2(x) # (bs, c, L)
+        x = self.block2(x)  # (bs, c, L)
 
         # Add back residual
-        x = x + res # (bs, c, L)
+        x = x + res  # (bs, c, L)
 
         return x
 
+
 class Encoder1D(nn.Module):
-    def __init__(self, channels_in: int, channels_out: int, num_residual_layers: int, cond_dim: int):
+    def __init__(
+        self,
+        channels_in: int,
+        channels_out: int,
+        num_residual_layers: int,
+        cond_dim: int,
+    ):
         super().__init__()
-        self.res_blocks = nn.ModuleList([
-            ResidualLayer1D(channels_in, cond_dim) for _ in range(num_residual_layers)
-        ])
-        self.downsample = nn.Conv1d(channels_in, channels_out, kernel_size=3, stride=2, padding=1)
+        self.res_blocks = nn.ModuleList(
+            [ResidualLayer1D(channels_in, cond_dim) for _ in range(num_residual_layers)]
+        )
+        self.downsample = nn.Conv1d(
+            channels_in, channels_out, kernel_size=3, stride=2, padding=1
+        )
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
@@ -67,12 +79,13 @@ class Encoder1D(nn.Module):
 
         return x
 
+
 class Midcoder1D(nn.Module):
     def __init__(self, channels: int, num_residual_layers: int, cond_dim: int):
         super().__init__()
-        self.res_blocks = nn.ModuleList([
-            ResidualLayer1D(channels, cond_dim) for _ in range(num_residual_layers)
-        ])
+        self.res_blocks = nn.ModuleList(
+            [ResidualLayer1D(channels, cond_dim) for _ in range(num_residual_layers)]
+        )
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
@@ -83,19 +96,29 @@ class Midcoder1D(nn.Module):
         # Pass through residual blocks: (bs, c, L) -> (bs, c, L)
         for block in self.res_blocks:
             x = block(x, cond_embed)
-            
+
         return x
 
+
 class Decoder1D(nn.Module):
-    def __init__(self, channels_in: int, channels_out: int, num_residual_layers: int, cond_dim: int):
+    def __init__(
+        self,
+        channels_in: int,
+        channels_out: int,
+        num_residual_layers: int,
+        cond_dim: int,
+    ):
         super().__init__()
         self.upsample = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode='linear', align_corners=False),
-            nn.Conv1d(channels_in, channels_out, kernel_size=3, padding=1)
+            nn.Upsample(scale_factor=2, mode="linear", align_corners=False),
+            nn.Conv1d(channels_in, channels_out, kernel_size=3, padding=1),
         )
-        self.res_blocks = nn.ModuleList([
-            ResidualLayer1D(channels_out, cond_dim) for _ in range(num_residual_layers)
-        ])
+        self.res_blocks = nn.ModuleList(
+            [
+                ResidualLayer1D(channels_out, cond_dim)
+                for _ in range(num_residual_layers)
+            ]
+        )
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
@@ -105,9 +128,55 @@ class Decoder1D(nn.Module):
         """
         # Upsample: (bs, c_in, L) -> (bs, c_out, 2*L)
         x = self.upsample(x)
-        
+
         # Pass through residual blocks: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
         for block in self.res_blocks:
             x = block(x, cond_embed)
+
+        return x
+
+
+class MidcoderTransformer1D(nn.Module):
+    def __init__(
+        self,
+        channels: int,
+        num_residual_layers: int,
+        num_transformer_layers: int,
+        cond_dim: int,
+        nhead: int = 8,
+    ):
+        super().__init__()
+        self.res_blocks = nn.ModuleList(
+            [ResidualLayer1D(channels, cond_dim) for _ in range(num_residual_layers)]
+        )
+
+        encoderLayer = nn.TransformerEncoderLayer(
+            d_model=channels,
+            nhead=nhead,
+            dim_feedforward=4 * channels,
+            batch_first=True,
+        )
+        self.transformer = nn.TransformerEncoder(
+            encoderLayer, num_layers=num_transformer_layers
+        )
+
+    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c, L)
+        - cond_embed: (bs, cond_dim)
+        """
+        # Residual blocks first: (bs, c, L) -> (bs, c, L)
+        for block in self.res_blocks:
+            x = block(x, cond_embed)
+
+        # Reshape for transformer: (bs, c, L) -> (bs, L, c)
+        x = x.transpose(1, 2)
+
+        # Self-attention: (bs, L, c) -> (bs, L, c)
+        x = self.transformer(x)
+
+        # Reshape back: (bs, L, c) -> (bs, c, L)
+        x = x.transpose(1, 2)
 
         return x
