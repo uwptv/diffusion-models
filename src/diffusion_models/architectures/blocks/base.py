@@ -165,3 +165,63 @@ class ResidualLayer(nn.Module):
         x = x + res  # (bs, c, ...)
 
         return x
+
+
+class CrossChannelAttention(nn.Module):
+    """
+    Self-attention mechanism across channels using feature vectors.
+
+    Input: (batch_size, c_in, sequence_length, features)
+    Output: (batch_size, c_in, sequence_length, features)
+
+    For each timestep and batch, applies self-attention across the channel dimension,
+    where each channel is represented by its feature vector.
+    """
+
+    def __init__(
+        self,
+        num_channels: int,
+        feature_dim: int,
+        num_heads: int = 8,
+        num_layers: int = 1,
+    ):
+        super().__init__()
+        self.num_channels = num_channels
+        self.feature_dim = feature_dim
+
+        # TransformerEncoderLayer expects: (seq_len, batch, embedding_dim)
+        # We'll treat channels as sequence length
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=feature_dim,
+            nhead=num_heads,
+            dim_feedforward=feature_dim * 4,
+            batch_first=True,
+            activation="relu",
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (batch_size, c_in, sequence_length, features)
+
+        Returns:
+        - output: (batch_size, c_in, sequence_length, features)
+        """
+        batch_size, c_in, seq_len, feature_dim = x.shape
+
+        # Reshape to (batch_size * sequence_length, c_in, features)
+        # This way we apply attention independently for each timestep
+        x = x.permute(0, 2, 1, 3)  # (batch_size, sequence_length, c_in, features)
+        x = x.reshape(
+            batch_size * seq_len, c_in, feature_dim
+        )  # (batch_size * sequence_length, c_in, features)
+
+        # Apply self-attention across channels
+        x = self.transformer(x)  # (batch_size * sequence_length, c_in, features)
+
+        # Reshape back to original format
+        x = x.reshape(batch_size, seq_len, c_in, feature_dim)
+        x = x.permute(0, 2, 1, 3)  # (batch_size, c_in, sequence_length, features)
+
+        return x

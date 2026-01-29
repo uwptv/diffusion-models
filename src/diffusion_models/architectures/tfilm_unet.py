@@ -4,7 +4,9 @@ import torch
 import torch.nn as nn
 
 from .blocks.base import Conditioner
-from .blocks.tfilm import TFiLMDecoder, TFiLMEncoder, TFiLMMidcoder
+from .blocks.decoders import TFiLMDecoder
+from .blocks.encoders import TFiLMEncoder
+from .blocks.midcoders import TFiLMMidcoder
 
 
 class TFiLMUNet(nn.Module):

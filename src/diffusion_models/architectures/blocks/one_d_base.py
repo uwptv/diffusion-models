@@ -105,5 +105,65 @@ class DepthwiseConv1D(nn.Module):
         Args:
         - x: (bs, c_in, L)
         """
-        x = self.depthwise(x)  # (bs, c_in, L)
+        x = self.depthwise(x)  # (bs, filters_per_channel * c_in, L)
+        return x
+
+
+class DepthwiseConv1DExplicit(nn.Module):
+    """
+    Depthwise convolution where each filter per channel is kept as a separate
+    feature dimension in the output.
+
+    Standard depthwise conv: (bs, c_in, L) -> (bs, filters_per_channel * c_in, L)
+    This version: (bs, c_in, L) -> (bs, c_in, L, filters_per_channel)
+
+    This makes the filter dimension explicit and separable for downstream processing.
+    """
+
+    def __init__(
+        self,
+        channels_in: int,
+        filters_per_channel: int,
+        kernel_size: int = 3,
+        padding: int = 0,
+        stride: int = 1,
+    ):
+        super().__init__()
+        self.channels_in = channels_in
+        self.filters_per_channel = filters_per_channel
+
+        # Still use grouped convolution, but we'll reshape the output
+        self.depthwise = nn.Conv1d(
+            channels_in,
+            filters_per_channel * channels_in,
+            kernel_size=kernel_size,
+            padding=padding,
+            stride=stride,
+            groups=channels_in,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c_in, L)
+
+        Returns:
+        - output: (bs, c_in, L_out, filters_per_channel)
+        """
+        bs, c_in, L = x.shape
+
+        # Apply depthwise convolution
+        x = self.depthwise(x)  # (bs, filters_per_channel * c_in, L_out)
+        L_out = x.shape[-1]
+
+        # Reshape to separate channel and filter dimensions
+        # From: (bs, filters_per_channel * c_in, L_out)
+        # To: (bs, c_in, filters_per_channel, L_out)
+        x = x.view(bs, c_in, self.filters_per_channel, L_out)
+
+        # Move filter dimension to the end
+        # From: (bs, c_in, filters_per_channel, L_out)
+        # To: (bs, c_in, L_out, filters_per_channel)
+        x = x.permute(0, 1, 3, 2)
+
         return x
