@@ -225,3 +225,83 @@ class CrossChannelAttention(nn.Module):
         x = x.permute(0, 2, 1, 3)  # (batch_size, c_in, sequence_length, features)
 
         return x
+
+
+class AdaGroupNorm(nn.Module):
+    """
+    Adaptive Group Normalization. Applies GroupNorm followed by a scale and shift
+    conditioned on an external embedding.
+    """
+
+    def __init__(self, num_groups: int, num_channels: int, cond_dim: int) -> None:
+        super().__init__()
+
+        self.group_norm = nn.GroupNorm(num_groups, num_channels, affine=False, eps=1e-6)
+        self.linear = nn.Linear(cond_dim, 2 * num_channels)
+        # outputs scale (γ) and shift (β)
+        # Initialize to do nothing at start (γ ≈ 1, β ≈ 0)
+
+        nn.init.zeros_(self.linear.weight)
+        nn.init.zeros_(self.linear.bias)
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (B, C, ...)
+        - cond: (B, cond_dim)
+        Returns:
+        - out: (B, C, ...)
+        """
+
+        x = self.group_norm(x)  # (B, C, ...)
+
+        gamma, beta = self.linear(cond).chunk(2, dim=1)  # (B, C)
+
+        # Make them dimension-independent (broadcast across any spatial dims)
+        shape = [gamma.shape[0], gamma.shape[1]] + [1] * (x.ndim - 2)
+        gamma = gamma.view(*shape)
+        beta = beta.view(*shape)
+
+        # Apply scale and shift
+        out = x * (1 + gamma) + beta  # (B, C, ...)
+
+        return out
+
+
+class InitialConvolution(nn.Module):
+    """
+    Provides an initial convolutional layer that extends the channels to a specified output dimension. Uses 1D or 2D convolution based on the input flag.
+    Dataflow: Convolution -> Adaptive Group Normalization -> Activation
+    Dimensions: Input (B, in_channels, L) -> Output (B, out_channels, L) when use_1d is True or (B, out_channels, H, W) when use_1d is False
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        cond_dim: int,
+        use_1d: bool = True,
+        activation: str = "silu",
+    ):
+        super().__init__()
+        if use_1d:
+            self.conv = nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1)
+        else:
+            self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        self.ada_group_norm = AdaGroupNorm(
+            num_groups=8, num_channels=out_channels, cond_dim=cond_dim
+        )
+        self.activation = get_activation(activation)
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (B, in_channels, L) when use_1d is True or (B, in_channels, H, W) when use_1d is False
+        - cond: (B, cond_dim)
+        Returns:
+        - out: (B, out_channels, L) when use_1d is True or (B, out_channels, H, W) when use_1d is False
+        """
+        x = self.conv(x)  # (B, out_channels, ...)
+        x = self.ada_group_norm(x, cond)  # (B, out_channels, ...)
+        x = self.activation(x)  # (B, out_channels, ...)
+        return x

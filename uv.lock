@@ -119,6 +119,11 @@ dependencies = [
     { name = "tqdm" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pdoc" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "matplotlib", specifier = ">=3.10.8" },
@@ -129,6 +134,9 @@ requires-dist = [
     { name = "torchvision", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = ">=0.25.0", index = "https://download.pytorch.org/whl/cu130" },
     { name = "tqdm", specifier = ">=4.67.1" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pdoc", specifier = ">=16.0.0" }]
 
 [[package]]
 name = "filelock"
@@ -250,6 +258,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/99/dd/841e9a66c4715477ea0abc78da039832fbb09dac5c35c58dc4c41a407b8a/kiwisolver-1.4.9-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:aedff62918805fb62d43a4aa2ecd4482c380dc76cd31bd7c8878588a61bd0369", size = 2391835, upload-time = "2025-08-10T21:27:34.23Z" },
     { url = "https://files.pythonhosted.org/packages/0c/28/4b2e5c47a0da96896fdfdb006340ade064afa1e63675d01ea5ac222b6d52/kiwisolver-1.4.9-cp314-cp314t-win_amd64.whl", hash = "sha256:1fa333e8b2ce4d9660f2cda9c0e1b6bafcfb2457a9d259faa82289e73ec24891", size = 79988, upload-time = "2025-08-10T21:27:35.587Z" },
     { url = "https://files.pythonhosted.org/packages/80/be/3578e8afd18c88cdf9cb4cffde75a96d2be38c5a903f1ed0ceec061bd09e/kiwisolver-1.4.9-cp314-cp314t-win_arm64.whl", hash = "sha256:4a48a2ce79d65d363597ef7b567ce3d14d68783d2b2263d98db3d9477805ba32", size = 70260, upload-time = "2025-08-10T21:27:36.606Z" },
+]
+
+[[package]]
+name = "markdown2"
+version = "2.5.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/42/f8/b2ae8bf5f28f9b510ae097415e6e4cb63226bb28d7ee01aec03a755ba03b/markdown2-2.5.4.tar.gz", hash = "sha256:a09873f0b3c23dbfae589b0080587df52ad75bb09a5fa6559147554736676889", size = 145652, upload-time = "2025-07-27T16:16:24.307Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b8/06/2697b5043c3ecb720ce0d243fc7cf5024c0b5b1e450506e9b21939019963/markdown2-2.5.4-py3-none-any.whl", hash = "sha256:3c4b2934e677be7fec0e6f2de4410e116681f4ad50ec8e5ba7557be506d3f439", size = 49954, upload-time = "2025-07-27T16:16:23.026Z" },
 ]
 
 [[package]]
@@ -578,6 +595,21 @@ wheels = [
 ]
 
 [[package]]
+name = "pdoc"
+version = "16.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jinja2" },
+    { name = "markdown2" },
+    { name = "markupsafe" },
+    { name = "pygments" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ac/fe/ab3f34a5fb08c6b698439a2c2643caf8fef0d61a86dd3fdcd5501c670ab8/pdoc-16.0.0.tar.gz", hash = "sha256:fdadc40cc717ec53919e3cd720390d4e3bcd40405cb51c4918c119447f913514", size = 111890, upload-time = "2025-10-27T16:02:16.345Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/16/a1/56a17b7f9e18c2bb8df73f3833345d97083b344708b97bab148fdd7e0b82/pdoc-16.0.0-py3-none-any.whl", hash = "sha256:070b51de2743b9b1a4e0ab193a06c9e6c12cf4151cf9137656eebb16e8556628", size = 100014, upload-time = "2025-10-27T16:02:15.007Z" },
+]
+
+[[package]]
 name = "pillow"
 version = "12.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -633,6 +665,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/53/26/c4188248bd5edaf543864fe4834aebe9c9cb4968b6f573ce014cc42d0720/pillow-12.1.0-cp314-cp314t-win32.whl", hash = "sha256:b17fbdbe01c196e7e159aacb889e091f28e61020a8abeac07b68079b6e626988", size = 6438703, upload-time = "2026-01-02T09:13:07.491Z" },
     { url = "https://files.pythonhosted.org/packages/b8/0e/69ed296de8ea05cb03ee139cee600f424ca166e632567b2d66727f08c7ed/pillow-12.1.0-cp314-cp314t-win_amd64.whl", hash = "sha256:27b9baecb428899db6c0de572d6d305cfaf38ca1596b5c0542a5182e3e74e8c6", size = 7182927, upload-time = "2026-01-02T09:13:09.841Z" },
     { url = "https://files.pythonhosted.org/packages/fc/f5/68334c015eed9b5cff77814258717dec591ded209ab5b6fb70e2ae873d1d/pillow-12.1.0-cp314-cp314t-win_arm64.whl", hash = "sha256:f61333d817698bdcdd0f9d7793e365ac3d2a21c1f1eb02b32ad6aefb8d8ea831", size = 2545104, upload-time = "2026-01-02T09:13:12.068Z" },
+]
+
+[[package]]
+name = "pygments"
+version = "2.19.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b0/77/a5b8c569bf593b0140bde72ea885a803b82086995367bf2037de0159d924/pygments-2.19.2.tar.gz", hash = "sha256:636cb2477cec7f8952536970bc533bc43743542f70392ae026374600add5b887", size = 4968631, upload-time = "2025-06-21T13:39:12.283Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c7/21/705964c7812476f378728bdf590ca4b771ec72385c533964653c68e86bdc/pygments-2.19.2-py3-none-any.whl", hash = "sha256:86540386c03d588bb81d44bc3928634ff26449851e99741617ecb9037ee5ec0b", size = 1225217, upload-time = "2025-06-21T13:39:07.939Z" },
 ]
 
 [[package]]
