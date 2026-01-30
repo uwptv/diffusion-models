@@ -122,49 +122,58 @@ class Conditioner(nn.Module):
 
 
 class ResidualLayer(nn.Module):
-    def __init__(self, channels: int, cond_dim: int):
+    def __init__(
+        self,
+        channels: int,
+        cond_dim: int,
+        num_groups: int = 8,
+        activation: str = "silu",
+        use_1d: bool = True,
+    ):
         super().__init__()
-        self.block1 = nn.Sequential(
-            nn.SiLU(),
-            nn.BatchNorm2d(channels),
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+        self.activation = get_activation(activation)
+
+        # Choose convolution type
+        conv_cls = nn.Conv1d if use_1d else nn.Conv2d
+
+        self.norm1 = AdaGroupNorm(
+            num_groups=num_groups, num_channels=channels, cond_dim=cond_dim
         )
-        self.block2 = nn.Sequential(
-            nn.SiLU(),
-            nn.BatchNorm2d(channels),
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+        self.conv1 = conv_cls(channels, channels, kernel_size=3, padding=1)
+        self.norm2 = AdaGroupNorm(
+            num_groups=num_groups, num_channels=channels, cond_dim=cond_dim
         )
-        # Converts (bs, cond_dim) -> (bs, channels)
+        self.conv2 = conv_cls(channels, channels, kernel_size=3, padding=1)
+
         self.cond_adapter = nn.Sequential(
-            nn.Linear(cond_dim, cond_dim), nn.SiLU(), nn.Linear(cond_dim, channels)
+            nn.Linear(cond_dim, cond_dim),
+            self.activation,
+            nn.Linear(cond_dim, channels),
         )
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         """
         Args:
-        - x: (bs, c, ...)
+        - x: (bs, c, L) for 1D or (bs, c, H, W) for 2D
         - cond: (bs, cond_dim)
+        Returns:
+        - output: same shape as x
         """
-        res = x.clone()  # (bs, c, ...)
+        res = x
+        x = self.activation(x)
+        x = self.norm1(x, cond)
+        x = self.conv1(x)
 
-        # Initial conv block
-        x = self.block1(x)  # (bs, c, ...)
-
-        # Add conditioning embedding - dimension independent
-        cond_adapted = self.cond_adapter(cond)  # (bs, channels)
-
-        # Add singleton dimensions to match x's dimensions after channel dim
-        for _ in range(x.ndim - 2):  # x.ndim - 2 gives spatial dimensions
-            cond_adapted = cond_adapted.unsqueeze(-1)
+        cond_adapted = self.cond_adapter(cond)  # (bs, c)
+        for _ in range(x.ndim - 2):
+            cond_adapted = cond_adapted.unsqueeze(-1)  # (bs, c, 1, ..., 1)
         x = x + cond_adapted
 
-        # Second conv block
-        x = self.block2(x)  # (bs, c, ...)
+        x = self.activation(x)
+        x = self.norm2(x, cond)
+        x = self.conv2(x)
 
-        # Add back residual
-        x = x + res  # (bs, c, ...)
-
-        return x
+        return x + res
 
 
 class CrossChannelAttention(nn.Module):
@@ -305,53 +314,6 @@ class InitialConvolution(nn.Module):
         x = self.ada_group_norm(x, cond)  # (B, out_channels, ...)
         x = self.activation(x)  # (B, out_channels, ...)
         return x
-
-
-class ResidualLayer1D(nn.Module):
-    def __init__(
-        self,
-        channels: int,
-        cond_dim: int,
-        num_groups: int = 8,
-        activation: str = "silu",
-    ):
-        super().__init__()
-        self.activation = get_activation(activation)
-        self.norm1 = AdaGroupNorm(
-            num_groups=num_groups, num_channels=channels, cond_dim=cond_dim
-        )
-        self.conv1 = nn.Conv1d(channels, channels, kernel_size=3, padding=1)
-        self.norm2 = AdaGroupNorm(
-            num_groups=num_groups, num_channels=channels, cond_dim=cond_dim
-        )
-        self.conv2 = nn.Conv1d(channels, channels, kernel_size=3, padding=1)
-
-        self.cond_adapter = nn.Sequential(
-            nn.Linear(cond_dim, cond_dim),
-            self.activation,
-            nn.Linear(cond_dim, channels),
-        )
-
-    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-        - x: (bs, c, L)
-        - cond: (bs, cond_dim)
-        Returns:
-        - output: (bs, c, L)"""
-        res = x
-        x = self.activation(x)
-        x = self.norm1(x, cond)
-        x = self.conv1(x)
-
-        cond = self.cond_adapter(cond).unsqueeze(-1)  # (bs, c, 1)
-        x = x + cond
-
-        x = self.activation(x)
-        x = self.norm2(x, cond)
-        x = self.conv2(x)
-
-        return x + res
 
 
 class SeperableConv1D(nn.Module):
