@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 
-from diffusion_models.architectures.blocks.base import ResidualLayer
-from diffusion_models.architectures.blocks.one_d_base import ResidualLayer1D
+from diffusion_models.architectures.blocks.base import ResidualLayer, ResidualLayer1D
 from diffusion_models.architectures.blocks.tfilm import TFiLM, TFiLMTransformer
 
 

@@ -3,13 +3,11 @@ import torch.nn as nn
 
 from diffusion_models.architectures.blocks.base import (
     CrossChannelAttention,
-    ResidualLayer,
-    get_activation,
-)
-from diffusion_models.architectures.blocks.one_d_base import (
     DepthwiseConv1DExplicit,
+    ResidualLayer,
     ResidualLayer1D,
     SeperableConv1D,
+    get_activation,
 )
 from diffusion_models.architectures.blocks.tfilm import TFiLM, TFiLMTransformer
 
