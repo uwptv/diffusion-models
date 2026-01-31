@@ -29,7 +29,8 @@ net = StandardUNet(
 )
 
 trainer = CFGTrainer(path=path, model=net, eta=0.1, null_label=0)
-trainer.train(num_epochs=2000, device=device, lr=1e-3, batch_size=250)
+trainer.train(num_epochs=1000, device=device, lr=1e-3, batch_size=250)
 
 visualize_generated_waves(model=net, guidance_scales=(1.0, 2.0, 4.0))
 # does not seem to work that well :(
+# model size is 2.6MiB parameters, trains resonably fast at at about 8.4 it/s, loss is about 1.3 after 1000 epochs, samples dont look very good empirically but one can see some structure

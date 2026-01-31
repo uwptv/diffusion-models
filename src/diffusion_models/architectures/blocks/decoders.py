@@ -2,10 +2,10 @@ import torch
 import torch.nn as nn
 
 from diffusion_models.architectures.blocks.base import (
+    AdaGroupNorm,
     CrossChannelAttention,
     DepthwiseConv1DExplicit,
     ResidualLayer,
-    ResidualLayer1D,
     SeperableConv1D,
     get_activation,
 )
@@ -52,6 +52,8 @@ class Decoder1D(nn.Module):
         channels_out: int,
         num_residual_layers: int,
         cond_dim: int,
+        num_groups: int = 8,
+        activation: str = "silu",
     ):
         super().__init__()
         self.upsample = nn.Sequential(
@@ -60,10 +62,14 @@ class Decoder1D(nn.Module):
         )
         self.res_blocks = nn.ModuleList(
             [
-                ResidualLayer1D(channels_out, cond_dim)
+                ResidualLayer(channels_out, cond_dim, use_1d=True)
                 for _ in range(num_residual_layers)
             ]
         )
+        self.norm = AdaGroupNorm(
+            num_groups=8, num_channels=channels_out, cond_dim=cond_dim
+        )
+        self.activation = get_activation(activation)
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
@@ -73,6 +79,8 @@ class Decoder1D(nn.Module):
         """
         # Upsample: (bs, c_in, L) -> (bs, c_out, 2*L)
         x = self.upsample(x)
+        x = self.norm(x, cond_embed)
+        x = self.activation(x)
 
         # Pass through residual blocks: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
         for block in self.res_blocks:
@@ -132,7 +140,7 @@ class TFiLMDecoder(nn.Module):
             )
         self.res_blocks = nn.ModuleList(
             [
-                ResidualLayer1D(channels_out, cond_dim=cond_dim)
+                ResidualLayer(channels_out, cond_dim=cond_dim, use_1d=True)
                 for _ in range(num_residual_layers)
             ]
         )
@@ -199,7 +207,7 @@ class HADecoder(nn.Module):
 
         self.res_blocks = nn.ModuleList(
             [
-                ResidualLayer1D(channels, cond_dim=cond_dim)
+                ResidualLayer(channels, cond_dim=cond_dim, use_1d=True)
                 for _ in range(num_residual_layers)
             ]
         )
@@ -292,7 +300,7 @@ class HADecoderTFiLM(nn.Module):
 
         self.res_blocks = nn.ModuleList(
             [
-                ResidualLayer1D(channels, cond_dim=cond_dim)
+                ResidualLayer(channels, cond_dim=cond_dim, use_1d=True)
                 for _ in range(num_residual_layers)
             ]
         )
@@ -374,7 +382,7 @@ class HADecoderImproved(nn.Module):
 
         self.res_blocks = nn.ModuleList(
             [
-                ResidualLayer1D(channels, cond_dim=cond_dim)
+                ResidualLayer(channels, cond_dim=cond_dim, use_1d=True)
                 for _ in range(num_residual_layers)
             ]
         )

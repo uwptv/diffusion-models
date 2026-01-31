@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from diffusion_models.architectures.blocks.base import ResidualLayer, ResidualLayer1D
+from diffusion_models.architectures.blocks.base import ResidualLayer
 from diffusion_models.architectures.blocks.tfilm import TFiLM, TFiLMTransformer
 
 
@@ -29,7 +29,10 @@ class Midcoder1D(nn.Module):
     def __init__(self, channels: int, num_residual_layers: int, cond_dim: int):
         super().__init__()
         self.res_blocks = nn.ModuleList(
-            [ResidualLayer1D(channels, cond_dim) for _ in range(num_residual_layers)]
+            [
+                ResidualLayer(channels, cond_dim, use_1d=True)
+                for _ in range(num_residual_layers)
+            ]
         )
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
@@ -56,7 +59,10 @@ class MidcoderTransformer1D(nn.Module):
     ):
         super().__init__()
         self.res_blocks = nn.ModuleList(
-            [ResidualLayer1D(channels, cond_dim) for _ in range(num_residual_layers)]
+            [
+                ResidualLayer(channels, cond_dim, use_1d=True)
+                for _ in range(num_residual_layers)
+            ]
         )
 
         encoderLayer = nn.TransformerEncoderLayer(
@@ -103,7 +109,7 @@ class TFiLMMidcoder(nn.Module):
         super().__init__()
         self.res_blocks = nn.ModuleList(
             [
-                ResidualLayer1D(channels, cond_dim=cond_dim)
+                ResidualLayer(channels, cond_dim=cond_dim, use_1d=True)
                 for _ in range(num_residual_layers)
             ]
         )
@@ -124,6 +130,7 @@ class TFiLMMidcoder(nn.Module):
         """
         Args:
         - x: (bs, c, L)
+        - cond_embed: (bs, cond_dim)
         """
         # Pass through residual blocks: (bs, c, L) -> (bs, c, L)
         for block in self.res_blocks:

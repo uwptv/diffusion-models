@@ -12,7 +12,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Initialize probability path
 path = GaussianConditionalProbabilityPath(
     p_data=SineWaveSampler(),
-    p_simple_shape=[1, 32, 32],
+    p_simple_shape=[1, 100 * int(2 * torch.pi)],
     alpha=LinearAlpha(),
     beta=LinearBeta(),
 ).to(device)
@@ -34,4 +34,4 @@ trainer.train(num_epochs=1000, device=device, lr=1e-3, batch_size=250)
 visualize_generated_sine_waves(model=unet, guidance_scales=(1.0, 2.0, 4.0))
 
 # Model summary:
-# trains fast (about 10 it/s), has about 1.8 MiB parameters, achieves loss of around 0.379 after 1000 epochs, samples look good empirically.
+# trains fast (about 8.3 it/s), has about 2.5 MiB parameters, achieves loss of around 0.35 after 1000 epochs, samples look ok empirically.

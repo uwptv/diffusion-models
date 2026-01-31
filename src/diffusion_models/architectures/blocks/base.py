@@ -160,18 +160,18 @@ class ResidualLayer(nn.Module):
         - output: same shape as x
         """
         res = x
-        x = self.activation(x)
-        x = self.norm1(x, cond)
         x = self.conv1(x)
+        x = self.norm1(x, cond)
+        x = self.activation(x)
 
         cond_adapted = self.cond_adapter(cond)  # (bs, c)
         for _ in range(x.ndim - 2):
             cond_adapted = cond_adapted.unsqueeze(-1)  # (bs, c, 1, ..., 1)
         x = x + cond_adapted
 
-        x = self.activation(x)
-        x = self.norm2(x, cond)
         x = self.conv2(x)
+        x = self.norm2(x, cond)
+        x = self.activation(x)
 
         return x + res
 
