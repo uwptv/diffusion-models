@@ -1,6 +1,6 @@
 import torch
 
-from diffusion_models.architectures.tunet import TUNet
+from diffusion_models.architectures.tunet import TUNetTransposed
 from diffusion_models.data.synthetic import WaveSampler
 from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath
 from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
@@ -18,7 +18,7 @@ path = GaussianConditionalProbabilityPath(
 ).to(device)
 
 # initialize model
-net = TUNet(
+net = TUNetTransposed(
     channels=[32, 64, 128],
     num_residual_layers=2,
     cond_dim=64,
@@ -32,4 +32,4 @@ trainer.train(num_epochs=1000, device=device, lr=1e-3, batch_size=250)
 # visualize generated waves
 visualize_generated_waves(model=net, guidance_scales=(1.0, 2.0, 4.0))
 
-# model parameters are quite a lot at 18.4 MiB, training is slow at around 3.5 it/s, achieves good loss at around 0.3 after 1000 epochs, wavves look ok (a bit noisy on lower amplitudes)
+# model is big with 18.4 MiB parameters, trains slow at about 3.5 it/s, loss at around 0.3 after 1000 epochs, samples look good empirically (a bit less noisy than non-transposed version)

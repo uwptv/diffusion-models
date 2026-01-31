@@ -31,3 +31,8 @@ trainer.train(num_epochs=1000, device=device, lr=1e-3, batch_size=250)
 
 # visualize generated waves
 visualize_generated_waves(model=net, guidance_scales=(1.0, 2.0, 4.0))
+
+# model parameters: 18.5 MiB
+# trains slowly at around 3.3 it/s
+# loss at around 0.3 after 1000 epochs
+# generated waves look ok (a little noisy)

@@ -49,6 +49,10 @@ class Midcoder1D(nn.Module):
 
 
 class MidcoderTransformer1D(nn.Module):
+    """
+    Midcoder with that uses self-attention via a transformer across the time domain for 1D signals. Used to capture long-range time dependencies.
+    """
+
     def __init__(
         self,
         channels: int,
@@ -113,7 +117,6 @@ class TFiLMMidcoder(nn.Module):
                 for _ in range(num_residual_layers)
             ]
         )
-        self.activation = nn.ReLU()
         if use_transformer:
             self.tfilm = TFiLMTransformer(
                 num_blocks=num_tfilm_blocks,
@@ -135,9 +138,6 @@ class TFiLMMidcoder(nn.Module):
         # Pass through residual blocks: (bs, c, L) -> (bs, c, L)
         for block in self.res_blocks:
             x = block(x, cond=cond_embed)
-
-        # Apply activation: (bs, c, L) -> (bs, c, L)
-        x = self.activation(x)
 
         # Apply TFiLM: (bs, c, L) -> (bs, c, L)
         x = self.tfilm(x)

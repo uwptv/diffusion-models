@@ -66,9 +66,7 @@ class Decoder1D(nn.Module):
                 for _ in range(num_residual_layers)
             ]
         )
-        self.norm = AdaGroupNorm(
-            num_groups=8, num_channels=channels_out, cond_dim=cond_dim
-        )
+        self.norm = AdaGroupNorm(num_groups, channels_out, cond_dim)
         self.activation = get_activation(activation)
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
@@ -97,54 +95,30 @@ class TFiLMDecoder(nn.Module):
         num_residual_layers: int,
         num_tfilm_blocks: int,
         cond_dim: int,
-        activation: str = "relu",
+        activation: str = "silu",
         conv_kernel_size: int = 3,
         conv_stride: int = 1,
         conv_padding: int = 1,
-        conv_output_padding: int = 0,
-        use_transpose_conv: bool = False,
         use_transformer: bool = False,
-        use_seperable_conv: bool = False,
     ):
         super().__init__()
-        if use_transpose_conv:
-            self.upsample = nn.ConvTranspose1d(
+        self.activation = get_activation(activation)
+        self.upsample = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="linear", align_corners=False),
+            nn.Conv1d(
                 channels_in,
                 channels_out,
                 kernel_size=conv_kernel_size,
-                stride=conv_stride,
                 padding=conv_padding,
-                output_padding=conv_output_padding,
-            )
-        else:
-            if use_seperable_conv:
-                conv = SeperableConv1D(
-                    channels_in,
-                    channels_out,
-                    filters_per_channel=4,
-                    kernel_size=conv_kernel_size,
-                    padding=conv_padding,
-                    stride=conv_stride,
-                )
-            else:
-                conv = nn.Conv1d(
-                    channels_in,
-                    channels_out,
-                    kernel_size=conv_kernel_size,
-                    padding=conv_padding,
-                    stride=conv_stride,
-                )
-            self.upsample = nn.Sequential(
-                nn.Upsample(scale_factor=2, mode="linear", align_corners=False),
-                conv,
-            )
+                stride=conv_stride,
+            ),
+        )
         self.res_blocks = nn.ModuleList(
             [
                 ResidualLayer(channels_out, cond_dim=cond_dim, use_1d=True)
                 for _ in range(num_residual_layers)
             ]
         )
-        self.activation = get_activation(activation)
         if use_transformer:
             self.tfilm = TFiLMTransformer(
                 num_blocks=num_tfilm_blocks,
@@ -162,13 +136,11 @@ class TFiLMDecoder(nn.Module):
         Args:
         - x: (bs, c_in, L)
         - cond_embed: (bs, cond_dim)
+        Returns:
+        - x: (bs, c_out, 2*L)
         """
         # Upsample: (bs, c_in, L) -> (bs, c_out, 2*L)
         x = self.upsample(x)
-
-        # Pass through residual blocks: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
-        for block in self.res_blocks:
-            x = block(x, cond_embed)
 
         # Apply activation: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
         x = self.activation(x)
@@ -176,7 +148,77 @@ class TFiLMDecoder(nn.Module):
         # Apply TFiLM: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
         x = self.tfilm(x)
 
+        # Pass through residual blocks: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
+        for block in self.res_blocks:
+            x = block(x, cond_embed)
+
         return x
+
+
+class TFiLMDecoderTransposed(TFiLMDecoder):
+    def __init__(
+        self,
+        channels_in: int,
+        channels_out: int,
+        num_residual_layers: int,
+        num_tfilm_blocks: int,
+        cond_dim: int,
+        conv_kernel_size: int = 3,
+        conv_stride: int = 2,
+        conv_padding: int = 1,
+        conv_output_padding: int = 1,
+        use_transformer: bool = False,
+    ):
+        super().__init__(
+            channels_in,
+            channels_out,
+            num_residual_layers,
+            num_tfilm_blocks,
+            cond_dim,
+            use_transformer=use_transformer,
+        )
+        self.upsample = nn.ConvTranspose1d(
+            channels_in,
+            channels_out,
+            kernel_size=conv_kernel_size,
+            stride=conv_stride,
+            padding=conv_padding,
+            output_padding=conv_output_padding,
+        )
+
+
+class TFiLMDecoderSeperable(TFiLMDecoder):
+    def __init__(
+        self,
+        channels_in: int,
+        channels_out: int,
+        num_residual_layers: int,
+        num_tfilm_blocks: int,
+        cond_dim: int,
+        conv_kernel_size: int = 3,
+        conv_stride: int = 1,
+        conv_padding: int = 1,
+        use_transformer: bool = False,
+    ):
+        super().__init__(
+            channels_in,
+            channels_out,
+            num_residual_layers,
+            num_tfilm_blocks,
+            cond_dim,
+            use_transformer=use_transformer,
+        )
+        self.upsample = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="linear", align_corners=False),
+            SeperableConv1D(
+                channels_in,
+                channels_out,
+                filters_per_channel=4,
+                kernel_size=conv_kernel_size,
+                padding=conv_padding,
+                stride=conv_stride,
+            ),
+        )
 
 
 class HADecoder(nn.Module):

@@ -316,6 +316,33 @@ class InitialConvolution(nn.Module):
         return x
 
 
+class InitialConvSeperable(InitialConvolution):
+    """
+    Initial convolutional layer using separable convolutions to extend channels to a specified output dimension.
+    Dataflow: Separable Convolution -> Adaptive Group Normalization -> Activation
+    Dimensions: Input (B, in_channels, L) -> Output (B, out_channels, L)
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        cond_dim: int,
+        filters_per_channel: int = 4,
+        activation: str = "silu",
+    ):
+        super().__init__(
+            in_channels, out_channels, cond_dim, use_1d=True, activation=activation
+        )
+        self.conv = SeperableConv1D(
+            channels_in=in_channels,
+            channels_out=out_channels,
+            filters_per_channel=filters_per_channel,
+            kernel_size=3,
+            padding=1,
+        )
+
+
 class SeperableConv1D(nn.Module):
     def __init__(
         self,
@@ -324,7 +351,7 @@ class SeperableConv1D(nn.Module):
         filters_per_channel: int,
         kernel_size: int = 3,
         stride: int = 1,
-        padding: int = 0,
+        padding: int = 1,
     ):
         super().__init__()
         self.depthwise = nn.Conv1d(

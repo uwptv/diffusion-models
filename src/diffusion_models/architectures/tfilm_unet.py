@@ -2,7 +2,7 @@ from typing import List
 
 import torch.nn as nn
 
-from .blocks.base import Conditioner, InitialConvolution
+from .blocks.base import InitialConvolution
 from .blocks.decoders import TFiLMDecoder
 from .blocks.encoders import TFiLMEncoder
 from .blocks.midcoders import TFiLMMidcoder
@@ -26,12 +26,6 @@ class TFiLMUNet(UNet):
         super().__init__(cond_dim, num_classes)
         self.init_conv = InitialConvolution(
             input_channels, channels[0], cond_dim, use_1d=True
-        )
-        self.conditioner = Conditioner(
-            num_classes=num_classes,  # e.g., 3 for amplitude classes
-            t_dim=64,  # time embedding dimension
-            y_dim=16,  # class embedding dimension
-            cond_dim=cond_dim,  # final conditioning dimension
         )
 
         # Encoders and Decoders
@@ -76,12 +70,6 @@ class TFiLMUNetTransformer(UNet):
         super().__init__(cond_dim, num_classes)
         self.init_conv = InitialConvolution(
             input_channels, channels[0], cond_dim, use_1d=True
-        )
-        self.conditioner = Conditioner(
-            num_classes=num_classes,  # e.g., 3 for amplitude classes
-            t_dim=64,  # time embedding dimension
-            y_dim=16,  # class embedding dimension
-            cond_dim=cond_dim,  # final conditioning dimension
         )
 
         # Encoders and Decoders

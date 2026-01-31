@@ -100,7 +100,6 @@ class TFiLMEncoder(nn.Module):
         conv_stride: int = 1,
         conv_padding: int = 1,
         use_transformer: bool = False,
-        use_seperable_conv: bool = False,
     ):
         super().__init__()
         self.res_blocks = nn.ModuleList(
@@ -109,23 +108,13 @@ class TFiLMEncoder(nn.Module):
                 for _ in range(num_residual_layers)
             ]
         )
-        if use_seperable_conv:
-            self.downsample = SeperableConv1D(
-                channels_in=channels_in,
-                channels_out=channels_out,
-                filters_per_channel=4,
-                kernel_size=conv_kernel_size,
-                stride=conv_stride,
-                padding=conv_padding,
-            )
-        else:
-            self.downsample = nn.Conv1d(
-                channels_in,
-                channels_out,
-                kernel_size=conv_kernel_size,
-                stride=2,
-                padding=conv_padding,
-            )
+        self.downsample = nn.Conv1d(
+            channels_in,
+            channels_out,
+            kernel_size=conv_kernel_size,
+            stride=2,
+            padding=conv_padding,
+        )
         self.activation = get_activation(activation)
         if use_transformer:
             self.tfilm = TFiLMTransformer(
@@ -159,6 +148,43 @@ class TFiLMEncoder(nn.Module):
         x = self.tfilm(x)
 
         return x
+
+
+class TFiLMEncoderSeperable(TFiLMEncoder):
+    def __init__(
+        self,
+        channels_in: int,
+        channels_out: int,
+        num_residual_layers: int,
+        num_tfilm_blocks: int,
+        cond_dim: int,
+        activation: str = "silu",
+        conv_kernel_size: int = 3,
+        conv_stride: int = 1,
+        conv_padding: int = 1,
+        use_transformer: bool = False,
+    ):
+        super().__init__(
+            channels_in,
+            channels_out,
+            num_residual_layers,
+            num_tfilm_blocks,
+            cond_dim,
+            activation,
+            conv_kernel_size,
+            conv_stride,
+            conv_padding,
+            use_transformer,
+        )
+        # Replace downsample with SeperableConv1D
+        self.downsample = SeperableConv1D(
+            channels_in=channels_in,
+            channels_out=channels_out,
+            filters_per_channel=4,
+            kernel_size=conv_kernel_size,
+            stride=2,
+            padding=conv_padding,
+        )
 
 
 class HAEncoder(nn.Module):
