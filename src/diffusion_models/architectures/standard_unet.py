@@ -1,16 +1,15 @@
 from typing import List
 
-import torch
 import torch.nn as nn
 
-from diffusion_models.architectures.blocks.base import Conditioner, InitialConvolution
+from diffusion_models.architectures.blocks.base import InitialConvolution
 from diffusion_models.architectures.blocks.decoders import Decoder1D
 from diffusion_models.architectures.blocks.encoders import Encoder1D
 from diffusion_models.architectures.blocks.midcoders import Midcoder1D
-from diffusion_models.dynamics.base import ConditionalVectorField
+from diffusion_models.architectures.unet import UNet
 
 
-class StandardUNet(ConditionalVectorField):
+class StandardUNet(UNet):
     """
     1D UNet for conditional (sine) wave generation.
     Uses an initial convolution to extend the channel dimension, followed by a series of encoder
@@ -30,18 +29,10 @@ class StandardUNet(ConditionalVectorField):
         num_classes: int,
         input_channels: int = 1,
     ):
-        super().__init__()
+        super().__init__(cond_dim, num_classes)
 
         self.init_conv = InitialConvolution(
             input_channels, channels[0], cond_dim=cond_dim, use_1d=True
-        )
-
-        # Replace separate embedders with Conditioner
-        self.conditioner = Conditioner(
-            num_classes=num_classes,  # e.g., 3 for amplitude classes
-            t_dim=64,  # time embedding dimension
-            y_dim=16,  # class embedding dimension
-            cond_dim=cond_dim,  # final conditioning dimension
         )
 
         # Encoders and Decoders (use cond_dim for both t_embed_dim and y_embed_dim)
@@ -55,34 +46,3 @@ class StandardUNet(ConditionalVectorField):
 
         self.midcoder = Midcoder1D(channels[-1], num_residual_layers, cond_dim)
         self.final_conv = nn.Conv1d(channels[0], 1, kernel_size=3, padding=1)
-
-    def forward(self, x: torch.Tensor, t: torch.Tensor, y: torch.Tensor):
-        """
-        Args:
-        - x: (bs, 1, L)
-        - t: (bs, 1, 1) -> will be squeezed to (bs,)
-        - y: (bs,) amplitude class labels
-        Returns:
-        - u_t^theta(x|y): (bs, 1, L)
-        """
-        # Get unified conditioning vector
-        t = t.squeeze(-1).squeeze(-1)  # (bs,)
-        y = y.squeeze(-1)  # (bs,)
-        cond = self.conditioner(t, y)  # (bs, cond_dim)
-
-        x = self.init_conv(x, cond)
-        residuals = []
-
-        for encoder in self.encoders:
-            x = encoder(x, cond)
-            residuals.append(x.clone())
-
-        x = self.midcoder(x, cond)
-
-        for decoder in self.decoders:
-            res = residuals.pop()
-            x = x + res
-            x = decoder(x, cond)
-
-        x = self.final_conv(x)
-        return x

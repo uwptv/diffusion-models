@@ -20,7 +20,12 @@ class TFiLM(nn.Module):
         self.to_params = nn.Linear(2 * self.rnn_hidden, 2 * channels)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (B, C, T)
+        """
+        Args:
+        - x: (B, C, T)
+        Returns:
+        - out: (B, C, T) with TFiLM applied
+        """
         B, C, T_orig = x.shape
 
         # Calculate padding needed

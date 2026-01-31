@@ -19,7 +19,11 @@ path = GaussianConditionalProbabilityPath(
 
 # Initialize model
 unet = StandardUNet(
-    channels=[32, 64, 128],
+    channels=[
+        32,
+        64,
+        128,
+    ],
     num_residual_layers=2,
     cond_dim=64,
     num_classes=3,
@@ -34,4 +38,4 @@ trainer.train(num_epochs=1000, device=device, lr=1e-3, batch_size=250)
 visualize_generated_sine_waves(model=unet, guidance_scales=(1.0, 2.0, 4.0))
 
 # Model summary:
-# trains fast (about 8.3 it/s), has about 2.5 MiB parameters, achieves loss of around 0.35 after 1000 epochs, samples look ok empirically.
+# trains fast (about 8.5 it/s), has about 2.6 MiB parameters, achieves loss of around 0.35 after 1000 epochs, samples look ok empirically.

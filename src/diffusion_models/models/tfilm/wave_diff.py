@@ -28,7 +28,9 @@ net = TFiLMUNet(
 )
 
 trainer = CFGTrainer(path=path, model=net, eta=0.1, null_label=0)
-trainer.train(num_epochs=2000, device=device, lr=1e-3, batch_size=250)
+trainer.train(num_epochs=1000, device=device, lr=1e-3, batch_size=250)
 
 # visualize generated waves
 visualize_generated_waves(model=net, guidance_scales=(1.0, 2.0, 4.0))
+
+# model is large at about 17.4 MiB parameters, trains resonably fast at about 7.7 it/s, empirically samples look pretty good after 1000 epochs, loss is about 0.45 after 1000 epochs

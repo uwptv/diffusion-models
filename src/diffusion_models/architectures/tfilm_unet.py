@@ -1,15 +1,15 @@
 from typing import List
 
-import torch
 import torch.nn as nn
 
-from .blocks.base import Conditioner
+from .blocks.base import Conditioner, InitialConvolution
 from .blocks.decoders import TFiLMDecoder
 from .blocks.encoders import TFiLMEncoder
 from .blocks.midcoders import TFiLMMidcoder
+from .unet import UNet
 
 
-class TFiLMUNet(nn.Module):
+class TFiLMUNet(UNet):
     """
     UNet with TFiLM conditioning for 1D signals
     """
@@ -23,11 +23,9 @@ class TFiLMUNet(nn.Module):
         cond_dim: int,
         input_channels: int = 3,
     ):
-        super().__init__()
-        self.init_conv = nn.Sequential(
-            nn.Conv1d(input_channels, channels[0], kernel_size=3, padding=1),
-            nn.BatchNorm1d(channels[0]),
-            nn.SiLU(),
+        super().__init__(cond_dim, num_classes)
+        self.init_conv = InitialConvolution(
+            input_channels, channels[0], cond_dim, use_1d=True
         )
         self.conditioner = Conditioner(
             num_classes=num_classes,  # e.g., 3 for amplitude classes
@@ -60,39 +58,8 @@ class TFiLMUNet(nn.Module):
             channels[0], input_channels, kernel_size=3, padding=1
         )
 
-    def forward(self, x: torch.Tensor, t: torch.Tensor, y: torch.Tensor):
-        """
-        Args:
-        - x: (bs, 1, L)
-        - t: (bs, 1, 1) -> will be squeezed to (bs,)
-        - y: (bs, 1) amplitude class labels
-        Returns:
-        - u_t^theta(x|y): (bs, 1, L)
-        """
-        # Get unified conditioning vector
-        t = t.squeeze(-1).squeeze(-1)  # (bs,)
-        y = y.squeeze(-1)  # (bs,)
-        cond = self.conditioner(t, y)  # (bs, cond_dim)
 
-        x = self.init_conv(x)
-        residuals = []
-
-        for encoder in self.encoders:
-            x = encoder(x, cond)
-            residuals.append(x.clone())
-
-        x = self.midcoder(x, cond)
-
-        for decoder in self.decoders:
-            res = residuals.pop()
-            x = x + res
-            x = decoder(x, cond)
-
-        x = self.final_conv(x)
-        return x
-
-
-class TFiLMUNetTransformer(nn.Module):
+class TFiLMUNetTransformer(UNet):
     """
     UNet with TFiLM conditioning for 1D signals (using Transformer-based TFiLM blocks)
     """
@@ -106,11 +73,9 @@ class TFiLMUNetTransformer(nn.Module):
         cond_dim: int,
         input_channels: int = 3,
     ):
-        super().__init__()
-        self.init_conv = nn.Sequential(
-            nn.Conv1d(input_channels, channels[0], kernel_size=3, padding=1),
-            nn.BatchNorm1d(channels[0]),
-            nn.SiLU(),
+        super().__init__(cond_dim, num_classes)
+        self.init_conv = InitialConvolution(
+            input_channels, channels[0], cond_dim, use_1d=True
         )
         self.conditioner = Conditioner(
             num_classes=num_classes,  # e.g., 3 for amplitude classes
@@ -156,34 +121,3 @@ class TFiLMUNetTransformer(nn.Module):
         self.final_conv = nn.Conv1d(
             channels[0], input_channels, kernel_size=3, padding=1
         )
-
-    def forward(self, x: torch.Tensor, t: torch.Tensor, y: torch.Tensor):
-        """
-        Args:
-        - x: (bs, 1, L)
-        - t: (bs, 1, 1) -> will be squeezed to (bs,)
-        - y: (bs, 1) amplitude class labels
-        Returns:
-        - u_t^theta(x|y): (bs, 1, L)
-        """
-        # Get unified conditioning vector
-        t = t.squeeze(-1).squeeze(-1)  # (bs,)
-        y = y.squeeze(-1)  # (bs,)
-        cond = self.conditioner(t, y)  # (bs, cond_dim)
-
-        x = self.init_conv(x)
-        residuals = []
-
-        for encoder in self.encoders:
-            x = encoder(x, cond)
-            residuals.append(x.clone())
-
-        x = self.midcoder(x, cond)
-
-        for decoder in self.decoders:
-            res = residuals.pop()
-            x = x + res
-            x = decoder(x, cond)
-
-        x = self.final_conv(x)
-        return x

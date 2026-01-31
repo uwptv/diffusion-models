@@ -21,7 +21,11 @@ path = GaussianConditionalProbabilityPath(
 
 # initialize model
 net = StandardUNet(
-    channels=[32, 64, 128],
+    channels=[
+        32,
+        64,
+        128,
+    ],
     num_residual_layers=2,
     cond_dim=64,
     num_classes=3,

@@ -97,7 +97,7 @@ class TFiLMEncoder(nn.Module):
         cond_dim: int,
         activation: str = "relu",
         conv_kernel_size: int = 3,
-        conv_stride: int = 2,
+        conv_stride: int = 1,
         conv_padding: int = 1,
         use_transformer: bool = False,
         use_seperable_conv: bool = False,
@@ -123,7 +123,7 @@ class TFiLMEncoder(nn.Module):
                 channels_in,
                 channels_out,
                 kernel_size=conv_kernel_size,
-                stride=conv_stride,
+                stride=2,
                 padding=conv_padding,
             )
         self.activation = get_activation(activation)

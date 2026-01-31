@@ -28,7 +28,9 @@ net = TFiLMUNetTransformer(
 )
 
 trainer = CFGTrainer(path=path, model=net, eta=0.1, null_label=0)
-trainer.train(num_epochs=2000, device=device, lr=1e-3, batch_size=250)
+trainer.train(num_epochs=1000, device=device, lr=1e-3, batch_size=250)
 
 # visualize generated waves
 visualize_generated_waves(model=net, guidance_scales=(1.0, 2.0, 4.0))
+
+# smaller model size at about 14.4 MiB paramters, trains slower than LSTM version at about 5.8 it/s, loss is about 0.35 after 1000 epochs, empirically samples look about the same as LSTM version
