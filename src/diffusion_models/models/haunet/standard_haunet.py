@@ -24,11 +24,14 @@ net = HAUNet(
     num_residual_layers=2,
     num_encoder_decoder_layers=3,
     cond_dim=64,
-    num_classes=3,
-    input_channels=3,
 )
 
 trainer = CFGTrainer(path=path, model=net, eta=0.1, null_label=0)
-trainer.train(num_epochs=2000, device=device, lr=1e-3, batch_size=50)
+trainer.train(num_epochs=1000, device=device, lr=1e-3, batch_size=50)
 
 visualize_generated_waves(model=net, guidance_scales=(1.0, 2.0, 4.0))
+
+# model size: 7 MiB
+# trains very slowly at around 1.1 it/s
+# loss at around 0.5 with heavy fluctuations after 1000 epochs
+# generated waves look

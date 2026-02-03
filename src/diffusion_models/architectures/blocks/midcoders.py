@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from diffusion_models.architectures.blocks.base import ResidualLayer
+from diffusion_models.architectures.blocks.base import ResidualLayer, ResidualLayer4D
 from diffusion_models.architectures.blocks.tfilm import TFiLM, TFiLMTransformer
 
 
@@ -30,7 +30,7 @@ class Midcoder1D(nn.Module):
         super().__init__()
         self.res_blocks = nn.ModuleList(
             [
-                ResidualLayer(channels, cond_dim, use_1d=True)
+                ResidualLayer(channels, cond_dim, use_1d=True, num_groups=channels)
                 for _ in range(num_residual_layers)
             ]
         )
@@ -46,6 +46,19 @@ class Midcoder1D(nn.Module):
             x = block(x, cond_embed)
 
         return x
+
+
+class Midcoder4D(Midcoder1D):
+    def __init__(
+        self,
+        channels: int,
+        num_residual_layers: int,
+        cond_dim: int,
+    ):
+        super().__init__(channels, num_residual_layers, cond_dim)
+        self.res_blocks = nn.ModuleList(
+            [ResidualLayer4D(channels, cond_dim) for _ in range(num_residual_layers)]
+        )
 
 
 class MidcoderTransformer1D(nn.Module):

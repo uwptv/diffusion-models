@@ -160,7 +160,7 @@ class ResidualLayer(nn.Module):
         - output: same shape as x
         """
         res = x
-        x = self.conv1(x)
+        x = self.conv1(x)  # (bs, c, L)
         x = self.norm1(x, cond)
         x = self.activation(x)
 
@@ -176,6 +176,46 @@ class ResidualLayer(nn.Module):
         return x + res
 
 
+class ResidualLayer4D(ResidualLayer):
+    def __init__(
+        self,
+        features: int,
+        cond_dim: int,
+    ):
+        super().__init__(
+            features,
+            cond_dim,
+            num_groups=features // 4,
+        )
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, channels, L, features)
+        - cond: (bs, cond_dim)
+        Returns:
+        - output: same shape as x
+        """
+        # Merge batch and channels for convolution
+        bs, channels, L, features = x.shape
+        x = x.permute(0, 1, 3, 2).reshape(
+            bs * channels, features, L
+        )  # (bs * channels, features, L)
+
+        # Expand cond to match reshaped batch size
+        # (bs, cond_dim) -> (bs*channels, cond_dim)
+        cond_expanded = cond.repeat_interleave(channels, dim=0)
+
+        x = super().forward(x, cond_expanded)  # (bs * channels, features, L)
+
+        # Reshape back to original format
+        x = x.reshape(bs, channels, features, L).permute(
+            0, 1, 3, 2
+        )  # (bs, channels, L, features)
+
+        return x
+
+
 class CrossChannelAttention(nn.Module):
     """
     Self-attention mechanism across channels using feature vectors.
@@ -189,13 +229,11 @@ class CrossChannelAttention(nn.Module):
 
     def __init__(
         self,
-        num_channels: int,
         feature_dim: int,
         num_heads: int = 8,
         num_layers: int = 1,
     ):
         super().__init__()
-        self.num_channels = num_channels
         self.feature_dim = feature_dim
 
         # TransformerEncoderLayer expects: (seq_len, batch, embedding_dim)
@@ -395,10 +433,13 @@ class DepthwiseConv1D(nn.Module):
             groups=channels_in,
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
         Args:
         - x: (bs, c_in, L)
+        - cond_embed: (bs, cond_dim)
+        Returns:
+
         """
         x = self.depthwise(x)  # (bs, filters_per_channel * c_in, L)
         return x
@@ -409,56 +450,73 @@ class DepthwiseConv1DExplicit(nn.Module):
     Depthwise convolution where each filter per channel is kept as a separate
     feature dimension in the output.
 
-    Standard depthwise conv: (bs, c_in, L) -> (bs, filters_per_channel * c_in, L)
-    This version: (bs, c_in, L) -> (bs, c_in, L, filters_per_channel)
+    Standard depthwise conv: (bs, channels, L) -> (bs, filters_per_channel * channels, L)
+    This version: (bs, channels, L) -> (bs, channels, L, filters_per_channel)
 
     This makes the filter dimension explicit and separable for downstream processing.
     """
 
     def __init__(
         self,
-        channels_in: int,
+        channels: int,
         filters_per_channel: int,
         kernel_size: int = 3,
-        padding: int = 0,
+        padding: int = 1,
         stride: int = 1,
     ):
         super().__init__()
-        self.channels_in = channels_in
+        self.channels = channels
         self.filters_per_channel = filters_per_channel
 
         # Still use grouped convolution, but we'll reshape the output
         self.depthwise = nn.Conv1d(
-            channels_in,
-            filters_per_channel * channels_in,
+            channels,
+            filters_per_channel * channels,
             kernel_size=kernel_size,
             padding=padding,
             stride=stride,
-            groups=channels_in,
+            groups=channels,
         )
+
+    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, channels, L)
+        - cond_embed: (bs, cond_dim)
+        Returns:
+        - output: (bs, channels, L_out, filters_per_channel)
+        """
+        bs, channels, L = x.shape
+
+        # Apply depthwise convolution
+        x = self.depthwise(x)  # (bs, filters_per_channel * channels, L_out)
+        L_out = x.shape[-1]
+
+        # Reshape to separate channel and filter dimensions
+        # From: (bs, filters_per_channel * channels, L_out)
+        # To: (bs, channels, filters_per_channel, L_out)
+        x = x.view(bs, channels, self.filters_per_channel, L_out)
+
+        # Move filter dimension to the end
+        # From: (bs, channels, filters_per_channel, L_out)
+        # To: (bs, channels, L_out, filters_per_channel)
+        x = x.permute(0, 1, 3, 2)
+
+        return x
+
+
+class FeatureFusion(nn.Module):
+    def __init__(self, feature_dim: int):
+        super().__init__()
+        self.fusion_layer = nn.Linear(feature_dim, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-        - x: (bs, c_in, L)
-
+        - x: (B, C, L, feature_dim)
         Returns:
-        - output: (bs, c_in, L_out, filters_per_channel)
+        - out: (B, C, L)
         """
-        bs, c_in, L = x.shape
-
-        # Apply depthwise convolution
-        x = self.depthwise(x)  # (bs, filters_per_channel * c_in, L_out)
-        L_out = x.shape[-1]
-
-        # Reshape to separate channel and filter dimensions
-        # From: (bs, filters_per_channel * c_in, L_out)
-        # To: (bs, c_in, filters_per_channel, L_out)
-        x = x.view(bs, c_in, self.filters_per_channel, L_out)
-
-        # Move filter dimension to the end
-        # From: (bs, c_in, filters_per_channel, L_out)
-        # To: (bs, c_in, L_out, filters_per_channel)
-        x = x.permute(0, 1, 3, 2)
-
-        return x
+        x = self.fusion_layer(x)  # (B, C, L, 1)
+        out = x.squeeze(-1)  # (B, C, L)
+        return out

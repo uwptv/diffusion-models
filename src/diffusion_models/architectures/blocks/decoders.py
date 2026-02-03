@@ -6,6 +6,7 @@ from diffusion_models.architectures.blocks.base import (
     CrossChannelAttention,
     DepthwiseConv1DExplicit,
     ResidualLayer,
+    ResidualLayer4D,
     SeperableConv1D,
     get_activation,
 )
@@ -231,87 +232,86 @@ class HADecoder(nn.Module):
     def __init__(
         self,
         channels: int,
+        features_in: int,
+        features_out: int,
         cond_dim: int,
         num_residual_layers: int,
         activation: str = "relu",
-        filter_per_channel: int = 8,
     ):
         super().__init__()
-        self.channels = channels
         self.cond_dim = cond_dim
         self.activation = get_activation(activation)
+        self.norm = AdaGroupNorm(
+            num_groups=channels, num_channels=channels, cond_dim=cond_dim
+        )
 
         # Define Layers
         self.upsample = self.upsample = nn.Sequential(
             nn.Upsample(scale_factor=2, mode="linear", align_corners=False),
-            self.activation,
+            nn.Conv1d(features_in, features_out, kernel_size=3, padding=1),
         )
 
         self.res_blocks = nn.ModuleList(
             [
-                ResidualLayer(channels, cond_dim=cond_dim, use_1d=True)
+                ResidualLayer4D(
+                    features_out,
+                    cond_dim,
+                )
                 for _ in range(num_residual_layers)
             ]
         )
 
-        self.depthwise_conv = DepthwiseConv1DExplicit(
-            channels_in=self.channels,
-            filters_per_channel=filter_per_channel,
-            kernel_size=3,
-            padding=1,
-            stride=1,
-        )
         self.cc_attention = CrossChannelAttention(
-            num_channels=self.channels,
-            feature_dim=filter_per_channel,
+            feature_dim=features_out,
             num_heads=4,
             num_layers=6,
         )
 
-        self.pointwise_conv = nn.Linear(filter_per_channel, 1)
-
-        temporal_enc_layer = nn.TransformerEncoderLayer(
-            d_model=self.channels,
-            nhead=3,
-            dim_feedforward=4 * self.channels,
-            batch_first=True,
-        )
-        self.temporal_attention = nn.TransformerEncoder(
-            temporal_enc_layer, num_layers=6
-        )
+        self.temporal_attention = TFiLM(8, features_out, rnn_hidden=128)
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
         Args:
-        - x: (bs, c_in, L)
+        - x: (bs, channels, L, features_in)
         - cond_embed: (bs, cond_dim)
         Returns:
-        - x: (bs, c_in, 2*L)
+        - x: (bs, channels, 2*L, features_out)
         """
-        # Upsample: (bs, c_in, L) -> (bs, c_in, 2*L)
+        bs, c, seq_len, feat_dim = x.shape
+        # Merge batch and channels for upsampling
+        x = x.permute(0, 1, 3, 2).reshape(
+            bs * c, feat_dim, seq_len
+        )  # (bs * channels, features_in, L)
+
+        # Upsample: (bs * channels, features_in, L) -> (bs * channels, features_out, 2*L)
         x = self.upsample(x)
 
-        # Pass through residual blocks: (bs, c_in, 2*L) -> (bs, c_in, 2*L)
-        for block in self.res_blocks:
-            x = block(x, cond=cond_embed)
+        # Update feature dimension after upsampling
+        feat_dim = x.shape[1]
 
-        # Depthwise Conv: (bs, c_in, 2*L) -> (bs, c_in, 2*L, filter_per_channel)
-        x = self.depthwise_conv(x)
+        # Reshape back
+        x = x.reshape(bs, c, feat_dim, 2 * seq_len).permute(
+            0, 1, 3, 2
+        )  # (bs, channels, 2*L, features_out)
+        x = self.norm(x, cond_embed)
         x = self.activation(x)
 
-        # Cross-Channel Attention: (bs, c_in, 2*L, filter_per_channel) -> (bs, c_in, 2*L, filter_per_channel)
+        # Cross-Channel Attention: (bs, channels, 2*L, features_out) -> (bs, channels, 2*L, features_out)
         x = self.cc_attention(x)
 
-        # Pointwise Conv to reduce feature dim: (bs, c_in, 2*L, filter_per_channel) -> (bs, c_in, 2*L, 1)
-        x = self.pointwise_conv(x)
-        x = x.squeeze(-1)  # (bs, c_in, 2*L)
-        x = self.activation(x)
-
-        # Temporal Attention: (bs, c_in, 2*L) -> (bs, c_in, 2*L)
-        x = x.permute(0, 2, 1)  # (bs, 2*L, c_in)
+        x = x.permute(0, 1, 3, 2).reshape(
+            bs * c, feat_dim, 2 * seq_len
+        )  # (bs * channels, features_out, 2*L)
+        # temporal attention: (bs * channels, features_out, 2*L) -> (bs * channels, features_out, 2*L)
         x = self.temporal_attention(x)
 
-        x = x.permute(0, 2, 1)  # (bs, c_in, 2*L)
+        x = x.reshape(bs, c, feat_dim, 2 * seq_len).permute(
+            0, 1, 3, 2
+        )  # (bs, channels, 2*L, features_out)
+
+        # Pass through residual blocks: (bs, channels, 2*L, features_out) -> (bs, channels, 2*L, features_out)
+        for block in self.res_blocks:
+            x = block(x, cond=cond_embed)
 
         return x
 
