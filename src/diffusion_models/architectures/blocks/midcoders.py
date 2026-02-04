@@ -1,7 +1,11 @@
 import torch
 import torch.nn as nn
 
-from diffusion_models.architectures.blocks.base import ResidualLayer, ResidualLayer4D
+from diffusion_models.architectures.blocks.base import (
+    ConditionalCBAM,
+    ResidualLayer,
+    ResidualLayer4D,
+)
 from diffusion_models.architectures.blocks.tfilm import TFiLM, TFiLMTransformer
 
 
@@ -154,5 +158,29 @@ class TFiLMMidcoder(nn.Module):
 
         # Apply TFiLM: (bs, c, L) -> (bs, c, L)
         x = self.tfilm(x)
+
+        return x
+
+
+class CBAMMidcoder(nn.Module):
+    def __init__(self, channels: int, num_residual_layers: int, cond_dim: int):
+        super().__init__()
+        self.res_blocks = nn.ModuleList(
+            [ResidualLayer(channels, cond_dim) for _ in range(num_residual_layers)]
+        )
+        self.cbam_blocks = nn.ModuleList(
+            [ConditionalCBAM(channels, cond_dim) for _ in range(num_residual_layers)]
+        )
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c, L)
+        - cond: (bs, cond_dim)
+        """
+        # Pass through residual blocks and CBAM blocks: (bs, c, L) -> (bs, c, L)
+        for res_block, cbam_block in zip(self.res_blocks, self.cbam_blocks):
+            x = res_block(x, cond)
+            x = cbam_block(x, cond)
 
         return x

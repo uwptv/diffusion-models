@@ -520,3 +520,123 @@ class FeatureFusion(nn.Module):
         x = self.fusion_layer(x)  # (B, C, L, 1)
         out = x.squeeze(-1)  # (B, C, L)
         return out
+
+
+class CBAM(nn.Module):
+    """
+    Convolutional Block Attention Module (CBAM) for 1D data.
+    """
+
+    def __init__(self, channels: int, reduction_ratio: int = 4, kernel_size: int = 7):
+        super().__init__()
+        self.channel_attention = nn.Sequential(
+            nn.Linear(channels, channels // reduction_ratio),
+            nn.ReLU(),
+            nn.Linear(channels // reduction_ratio, channels),
+            nn.Sigmoid(),
+        )
+        self.spatial_attention = nn.Sequential(
+            nn.Conv1d(2, 1, kernel_size=kernel_size, padding=kernel_size // 2),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (B, C, L)
+        Returns:
+        - out: (B, C, L)
+        """
+        # Store residual
+        residual = x
+
+        # Compute the max and average across the time dimension
+        avg_pool = torch.mean(x, dim=2, keepdim=True)  # (B, C, 1)
+        max_pool, _ = torch.max(x, dim=2, keepdim=True)  # (B, C, 1)
+
+        # Run through MLP
+        avg_pool = self.channel_attention(avg_pool)  # (B, C, 1)
+        max_pool = self.channel_attention(max_pool)  # (B, C, 1)
+
+        # Compute channel attention
+        x = torch.sigmoid(x * (avg_pool + max_pool))  # (B, C, L)
+
+        # Spatial Attention
+        avg_out = torch.mean(x, dim=1, keepdim=True)  # (B, 1, L)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)  # (B, 1, L)
+        sa_input = torch.cat([avg_out, max_out], dim=1)  # (B, 2, L)
+        sa = self.spatial_attention(sa_input)  # (B, 1, L)
+        out = x * sa  # (B, C, L)
+
+        out = out + residual  # (B, C, L)
+
+        return out
+
+
+class ConditionalCBAM(nn.Module):
+    """
+    Convolutional Block Attention Module (CBAM) for 1D data with conditioning.
+    """
+
+    def __init__(
+        self,
+        channels: int,
+        cond_dim: int,
+        reduction_ratio: int = 4,
+        kernel_size: int = 7,
+        num_groups: int = 8,
+    ):
+        super().__init__()
+
+        # Normalize input before attention computation
+        self.input_norm = AdaGroupNorm(
+            num_groups=num_groups, num_channels=channels, cond_dim=cond_dim
+        )
+
+        self.channel_attention = nn.Sequential(
+            nn.Linear(channels + cond_dim, channels // reduction_ratio),
+            nn.ReLU(),
+            nn.Linear(channels // reduction_ratio, channels),
+            nn.Sigmoid(),
+        )
+
+        self.spatial_attention = nn.Sequential(
+            nn.Conv1d(2, 1, kernel_size=kernel_size, padding=kernel_size // 2),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (B, C, L)
+        - cond: (B, cond_dim)
+        Returns:
+        - out: (B, C, L)
+        """
+        residual = x
+
+        # Normalize input with conditioning
+        x = self.input_norm(x, cond)  # (B, C, L)
+
+        # Channel Attention
+        avg_pool = torch.mean(x, dim=2)  # (B, C)
+        max_pool, _ = torch.max(x, dim=2)  # (B, C)
+
+        # Concatenate with conditioning
+        avg_pool = torch.cat([avg_pool, cond], dim=1)  # (B, C + cond_dim)
+        max_pool = torch.cat([max_pool, cond], dim=1)  # (B, C + cond_dim)
+
+        avg_out = self.channel_attention(avg_pool).unsqueeze(-1)  # (B, C, 1)
+        max_out = self.channel_attention(max_pool).unsqueeze(-1)  # (B, C, 1)
+
+        channel_att = avg_out + max_out  # (B, C, 1)
+        x = x * channel_att  # (B, C, L)
+
+        # Spatial Attention
+        avg_out = torch.mean(x, dim=1, keepdim=True)  # (B, 1, L)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)  # (B, 1, L)
+        spatial_input = torch.cat([avg_out, max_out], dim=1)  # (B, 2, L)
+        spatial_att = self.spatial_attention(spatial_input)  # (B, 1, L)
+        out = x * spatial_att  # (B, C, L)
+
+        return out + residual

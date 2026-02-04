@@ -5,7 +5,7 @@ import torch.nn as nn
 from .blocks.base import InitialConvolution
 from .blocks.decoders import TFiLMDecoder
 from .blocks.encoders import TFiLMEncoder
-from .blocks.midcoders import TFiLMMidcoder
+from .blocks.midcoders import CBAMMidcoder, TFiLMMidcoder
 from .unet import UNet
 
 
@@ -109,3 +109,29 @@ class TFiLMUNetTransformer(UNet):
         self.final_conv = nn.Conv1d(
             channels[0], input_channels, kernel_size=3, padding=1
         )
+
+
+class TFiLMUNetCBAM(TFiLMUNet):
+    """
+    UNet with TFiLM and CBAM conditioning for 1D signals
+    """
+
+    def __init__(
+        self,
+        channels: List[int],
+        num_residual_layers: int,
+        num_tfilm_blocks: int,
+        num_classes: int,
+        cond_dim: int,
+        input_channels: int = 3,
+    ):
+        super().__init__(
+            channels,
+            num_residual_layers,
+            num_tfilm_blocks,
+            num_classes,
+            cond_dim,
+            input_channels,
+        )
+
+        self.midcoder = CBAMMidcoder(channels[-1], num_residual_layers, cond_dim)
