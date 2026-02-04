@@ -36,7 +36,9 @@ net = TFiLMUNetCBAM(
 )
 
 trainer = CFGTrainer(path=path, model=net, eta=0.1, null_label=6)
-trainer.train(num_epochs=1000, device=device, lr=1e-3, batch_size=250)
+trainer.train(
+    num_epochs=1000, device=device, lr=1e-3, batch_size=250, name="TFiLMUNetCBAM"
+)
 
 # visualize generated waves
 visualize_generated_waves(

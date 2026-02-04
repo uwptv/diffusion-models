@@ -1,3 +1,5 @@
+import os
+
 import matplotlib.pyplot as plt
 import torch
 from torchvision.utils import make_grid
@@ -396,7 +398,6 @@ def visualize_generated_waves(
         - guidance_scales: tuple of guidance scale values to test
         - null_class: the null class label for classifier-free guidance
     """
-    import os
 
     model.eval()
 
@@ -487,13 +488,13 @@ def visualize_generated_waves(
     # Save the plot
     save_path = os.path.join(save_dir, f"{name}.png")
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
-    print(f"Plot saved to {save_path}")
 
     plt.show()
 
 
 def visualize_generated_data_samples(
     model: ConditionalVectorField,
+    name: str,
     samples_per_activity: int = 1,
     num_timesteps: int = 100,
     guidance_scales=(1.0,),
@@ -523,7 +524,7 @@ def visualize_generated_data_samples(
     }
 
     # Infer signal length from the WISDM sampler
-    sampler = DataSampler(dataset="wisdm")
+    sampler = DataSampler(dataset="wisdm", window_time=6.0)
 
     # Get one sample to infer shape
     sample_data, _ = sampler.sample(1)
@@ -611,4 +612,15 @@ def visualize_generated_data_samples(
         fontweight="bold",
     )
     plt.tight_layout()
+
+    # Create directory if it doesn't exist
+    save_dir = "plots/signals"
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Save the plot
+    save_path = os.path.join(save_dir, f"{name}.png")
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+
+    plt.show()
+
     plt.show()

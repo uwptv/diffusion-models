@@ -24,7 +24,7 @@ class HAUNet(UNet):
         cond_dim: int,
         num_residual_layers: int,
         num_encoder_decoder_layers: int,
-        num_classes: int = 3,
+        num_classes: int,
         input_channels: int = 3,
         initial_features: int = 8,
     ):
