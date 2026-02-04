@@ -1,11 +1,14 @@
 import torch
 
 from diffusion_models.architectures.standard_unet import StandardUNet
+from diffusion_models.data.loaders import DataSampler
 from diffusion_models.data.synthetic import WaveSampler
 from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath
 from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
 from diffusion_models.trainers import CFGTrainer
-from diffusion_models.utils.visualizations import visualize_generated_waves
+from diffusion_models.utils.visualizations import (
+    visualize_generated_data_samples,
+)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -17,7 +20,14 @@ path = GaussianConditionalProbabilityPath(
     beta=LinearBeta(),
 ).to(device)
 
-# visualize_wave_path()
+activity_path = GaussianConditionalProbabilityPath(
+    p_data=DataSampler(dataset="wisdm"),
+    p_simple_shape=[3, 100],
+    alpha=LinearAlpha(),
+    beta=LinearBeta(),
+).to(device)
+
+# visualize_gaussian_cond_prob_path(path=activity_path, num_samples=4, num_timesteps=5)
 
 # initialize model
 net = StandardUNet(
@@ -28,13 +38,14 @@ net = StandardUNet(
     ],
     num_residual_layers=2,
     cond_dim=64,
-    num_classes=3,
+    num_classes=6,
     input_channels=3,
 )
 
-trainer = CFGTrainer(path=path, model=net, eta=0.1, null_label=0)
-trainer.train(num_epochs=1000, device=device, lr=1e-3, batch_size=250)
+trainer = CFGTrainer(path=activity_path, model=net, eta=0.1, null_label=6)
+trainer.train(num_epochs=100, device=device, lr=1e-3, batch_size=250)
 
-visualize_generated_waves(model=net, guidance_scales=(1.0, 2.0, 4.0))
+# visualize_generated_waves(model=net, guidance_scales=(1.0, 2.0, 4.0))
+visualize_generated_data_samples(model=net, guidance_scales=(1.0, 2.0, 4.0))
 # does not seem to work that well :(
 # model size is 2.6MiB parameters, trains resonably fast at at about 8.4 it/s, loss is about 1.3 after 1000 epochs, samples dont look very good empirically but one can see some structure
