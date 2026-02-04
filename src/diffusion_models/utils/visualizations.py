@@ -378,6 +378,7 @@ def visualize_generated_sine_waves(
 
 def visualize_generated_waves(
     model: ConditionalVectorField,
+    name: str,
     samples_per_amplitude: int = 1,
     num_timesteps: int = 100,
     guidance_scales=(1.0,),
@@ -385,14 +386,18 @@ def visualize_generated_waves(
 ):
     """
     Generate waves per amplitude class via the trained model, showing each channel separately.
+    Always saves the plot to plots/signals/{name}.png
 
     Args:
         - model: trained conditional vector field model
+        - name: required name for the saved plot (without extension)
         - samples_per_amplitude: number of samples to generate per amplitude class
         - num_timesteps: number of time steps for ODE simulation
         - guidance_scales: tuple of guidance scale values to test
         - null_class: the null class label for classifier-free guidance
     """
+    import os
+
     model.eval()
 
     # Infer signal length and amplitude classes from the wave sampler
@@ -474,6 +479,16 @@ def visualize_generated_waves(
         "Generated Waves by Channel and Amplitude Class", fontsize=16, fontweight="bold"
     )
     plt.tight_layout()
+
+    # Create directory if it doesn't exist
+    save_dir = "plots/signals"
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Save the plot
+    save_path = os.path.join(save_dir, f"{name}.png")
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"Plot saved to {save_path}")
+
     plt.show()
 
 

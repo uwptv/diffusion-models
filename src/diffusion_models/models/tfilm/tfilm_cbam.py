@@ -39,10 +39,12 @@ trainer = CFGTrainer(path=path, model=net, eta=0.1, null_label=6)
 trainer.train(num_epochs=1000, device=device, lr=1e-3, batch_size=250)
 
 # visualize generated waves
-visualize_generated_waves(model=net, guidance_scales=(1.0, 2.0, 4.0))
+visualize_generated_waves(
+    model=net, name="TFiLMUNetCBAM", guidance_scales=(1.0, 2.0, 4.0)
+)
 # visualize_generated_data_samples(model=net, guidance_scales=(1.0, 2.0, 4.0))
 
 # model parameters: 14.1 MiB
 # trains fast at about 7.5 it/s
-# loss is about   after 1000 epochs
+# loss is about 0.35 after 1000 epochs
 # samples look ok empirically, pretty noisy on lower amplitudes but cross-channel correlations look good
