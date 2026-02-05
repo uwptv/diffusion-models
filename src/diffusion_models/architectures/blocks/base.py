@@ -640,3 +640,74 @@ class ConditionalCBAM(nn.Module):
         out = x * spatial_att  # (B, C, L)
 
         return out + residual
+
+
+class MBConv(nn.Module):
+    """
+    (Mobile) Inverted Bottleneck Convolutional Block for 1D data.
+    """
+
+    def __init__(
+        self,
+        channels_in: int,
+        channels_out: int,
+        cond_dim: int,
+        expansion_factor: int = 4,
+        kernel_size: int = 3,
+        stride: int = 1,
+    ):
+        super().__init__()
+        hidden_dim = channels_in * expansion_factor
+        padding = kernel_size // 2
+
+        self.expand_conv = nn.Conv1d(channels_in, hidden_dim, kernel_size=1)
+        self.depthwise_conv = nn.Conv1d(
+            hidden_dim,
+            hidden_dim,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            groups=hidden_dim,
+        )
+        self.project_conv = nn.Conv1d(hidden_dim, channels_out, kernel_size=1)
+        self.norm_expand = AdaGroupNorm(
+            num_groups=8, num_channels=hidden_dim, cond_dim=cond_dim
+        )
+        self.norm_depthwise = AdaGroupNorm(
+            num_groups=8, num_channels=hidden_dim, cond_dim=cond_dim
+        )
+        self.norm_project = AdaGroupNorm(
+            num_groups=min(8, channels_out),
+            num_channels=channels_out,
+            cond_dim=cond_dim,
+        )
+        self.activation = nn.SiLU()
+        self.use_residual = (channels_in == channels_out) and (stride == 1)
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (B, channels_in, L)
+        - cond: (B, cond_dim)
+        Returns:
+        - out: (B, channels_out, L_out)
+        """
+        residual = x
+
+        x = self.expand_conv(x)  # (B, hidden_dim, L)
+        x = self.norm_expand(x, cond)  # (B, hidden_dim, L)
+        x = self.activation(x)
+
+        x = self.depthwise_conv(x)  # (B, hidden_dim, L_out)
+        x = self.norm_depthwise(x, cond)  # (B, hidden_dim, L_out)
+        x = self.activation(x)
+
+        x = self.project_conv(x)  # (B, channels_out, L_out)
+        x = self.norm_project(x, cond)  # (B, channels_out, L_out)
+
+        if self.use_residual:
+            x = (
+                x + residual
+            )  # (B, channels_out, L_out), L_out is L in that case and channels_out == channels_in
+
+        return x

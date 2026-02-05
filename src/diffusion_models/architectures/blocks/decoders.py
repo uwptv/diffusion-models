@@ -5,6 +5,7 @@ from diffusion_models.architectures.blocks.base import (
     AdaGroupNorm,
     CrossChannelAttention,
     DepthwiseConv1DExplicit,
+    MBConv,
     ResidualLayer,
     ResidualLayer4D,
     SeperableConv1D,
@@ -220,6 +221,73 @@ class TFiLMDecoderSeperable(TFiLMDecoder):
                 stride=conv_stride,
             ),
         )
+
+
+class TFiLMMBConvDecoder(TFiLMDecoder):
+    """
+    TFiLM Decoder using MBConv for upsampling.
+    """
+
+    def __init__(
+        self,
+        channels_in: int,
+        channels_out: int,
+        num_residual_layers: int,
+        num_tfilm_blocks: int,
+        cond_dim: int,
+        activation: str = "silu",
+        conv_kernel_size: int = 3,
+        conv_stride: int = 1,
+        conv_padding: int = 1,
+        use_transformer: bool = False,
+    ):
+        super().__init__(
+            channels_in,
+            channels_out,
+            num_residual_layers,
+            num_tfilm_blocks,
+            cond_dim,
+            activation,
+            conv_kernel_size=conv_kernel_size,
+            conv_stride=conv_stride,
+            conv_padding=conv_padding,
+            use_transformer=use_transformer,
+        )
+        self.upsample = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="linear", align_corners=False),
+        )
+        self.mbconv = MBConv(
+            channels_in=channels_in,
+            channels_out=channels_out,
+            cond_dim=cond_dim,
+            expansion_factor=4,
+            kernel_size=conv_kernel_size,
+            stride=1,
+        )
+
+    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c_in, L)
+        - cond_embed: (bs, cond_dim)
+        Returns:
+        - x: (bs, c_out, 2*L)
+        """
+        # Upsample: (bs, c_in, L) -> (bs, c_in, 2*L)
+        x = self.upsample(x)
+
+        # MBConv: (bs, c_in, 2*L) -> (bs, c_out, 2*L)
+        x = self.mbconv(x, cond=cond_embed)
+
+        # No activation here, as MBConv includes it
+        # Apply TFiLM: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
+        x = self.tfilm(x)
+
+        # Pass through residual blocks: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
+        for block in self.res_blocks:
+            x = block(x, cond_embed)
+
+        return x
 
 
 class HADecoder(nn.Module):
