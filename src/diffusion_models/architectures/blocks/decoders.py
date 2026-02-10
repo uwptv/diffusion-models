@@ -79,7 +79,7 @@ class Decoder1D(nn.Module):
         """
         # Upsample: (bs, c_in, L) -> (bs, c_out, 2*L)
         x = self.upsample(x)
-        x = self.norm(x, cond_embed)
+        # x = self.norm(x, cond_embed) # Commented out normalization for better comparison with other models
         x = self.activation(x)
 
         # Pass through residual blocks: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
