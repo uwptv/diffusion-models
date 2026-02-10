@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from .base import SinusoidalEmbedding
+
 
 class TFiLM(nn.Module):
     def __init__(
@@ -84,6 +86,7 @@ class TFiLMTransformer(nn.Module):
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.to_params = nn.Linear(channels, 2 * channels)
+        self.pos_encoding = SinusoidalEmbedding(channels)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (B, C, T)
@@ -105,6 +108,11 @@ class TFiLMTransformer(nn.Module):
 
         # Max-pool over time within each block: (B, num_blocks, C)
         pooled = blocks.max(dim=-1).values
+
+        # Use positional encoding
+        pos = torch.arange(self.num_blocks, device=pooled.device)  # (num_blocks,)
+        pos_emb = self.pos_encoding(pos).unsqueeze(0)  # (1, num_blocks, C)
+        pooled = pooled + pos_emb
 
         # Transformer over blocks (sequence length = num_blocks)
         transformer_out = self.transformer(pooled)  # (B, num_blocks, C)

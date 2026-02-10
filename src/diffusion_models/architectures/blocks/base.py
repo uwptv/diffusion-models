@@ -91,11 +91,35 @@ class SinusoidalTimeEmbedding(nn.Module):
         return emb
 
 
+class SinusoidalEmbedding(nn.Module):
+    def __init__(self, dim: int):
+        super().__init__()
+        assert dim % 2 == 0
+        self.half_dim = dim // 2
+        freqs = torch.exp(
+            -math.log(10000)
+            * torch.arange(0, self.half_dim, dtype=torch.float32)
+            / self.half_dim
+        )
+        self.register_buffer("freqs", freqs)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x can be (B,), (B, 1), (L,), or (B, L)
+        if x.dim() == 1:
+            x = x.view(-1, 1)  # (N, 1) where N=B or L
+        angles = (
+            x * self.freqs * 2 * math.pi
+        )  # broadcast to (N, half_dim) or (B, L, half_dim)
+        sin = torch.sin(angles)
+        cos = torch.cos(angles)
+        return torch.cat([sin, cos], dim=-1)
+
+
 class Conditioner(nn.Module):
     def __init__(self, num_classes: int, t_dim: int, y_dim: int, cond_dim: int) -> None:
         super().__init__()
 
-        self.t_embedder = SinusoidalTimeEmbedding(t_dim)
+        self.t_embedder = SinusoidalEmbedding(t_dim)
         self.y_embedder = nn.Embedding(num_classes + 1, y_dim)
 
         self.mlp = nn.Sequential(
