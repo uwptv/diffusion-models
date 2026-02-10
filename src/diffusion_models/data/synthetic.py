@@ -93,10 +93,11 @@ class WaveSampler(nn.Module, Sampleable):
         self.sample_rate = sample_rate
         self.duration = duration
         self.dummy = nn.Buffer(torch.zeros(1))
+        self._seed = seed
         self._gen = None
-        if seed is not None:
+        if self._gen is not None and self._gen.device != self.dummy.device:
             self._gen = torch.Generator(device=self.dummy.device)
-            self._gen.manual_seed(seed)
+            self._gen.manual_seed(self._seed)
 
     def sample(
         self, num_samples: int, mean: float = 1.0, std: float = 0.5
@@ -115,6 +116,10 @@ class WaveSampler(nn.Module, Sampleable):
         t = torch.linspace(
             0, self.duration, self.sample_rate * self.duration, device=self.dummy.device
         )
+        # Ensure generator is on the same device as dummy
+        if self._gen is not None and self._gen.device != self.dummy.device:
+            self._gen = torch.Generator(device=self.dummy.device)
+            self._gen.manual_seed(self._seed)
         class_indices = torch.randint(
             0,
             num_classes,
