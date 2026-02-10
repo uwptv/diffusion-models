@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "matplotlib>=3.10.8",
+    "mlflow>=3.9.0",
     "scikit-learn>=1.8.0",
     "torch>=2.10.0",
     "torchinfo>=1.8.0",

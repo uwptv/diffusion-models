@@ -1,7 +1,10 @@
+import tempfile
 from abc import ABC, abstractmethod
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import mlflow
+import mlflow.pytorch
 import torch
 from sklearn.metrics import confusion_matrix
 from torch import nn
@@ -36,41 +39,28 @@ class Trainer(ABC):
         size_b = model_size_b(self.model)
         print(f"Training model with size: {size_b / MiB:.3f} MiB")
 
-        plot_dir = Path("plots/losses")
-        plot_dir.mkdir(parents=True, exist_ok=True)
-        plot_path = plot_dir / f"{name}.png"
-
         # Start
         self.model.to(device)
         opt = self.get_optimizer(lr)
         self.model.train()
-        losses = []
 
         # Train loop
-        pbar = tqdm(enumerate(range(num_epochs)))
-        for idx, _ in pbar:
-            opt.zero_grad()
-            loss = self.get_train_loss(**kwargs)
-            loss.backward()
-            opt.step()
-            losses.append(loss.item())
-            pbar.set_description(f"Epoch {idx}, loss: {loss.item():.3f}")
+        with mlflow.start_run(run_name=name):
+            mlflow.log_param("lr", lr)
+            mlflow.log_param("num_epochs", num_epochs)
+            mlflow.log_param("model_size_mib", size_b / MiB)
 
-        # Finish
-        self.model.eval()
+            pbar = tqdm(enumerate(range(num_epochs)))
+            for idx, _ in pbar:
+                opt.zero_grad()
+                loss = self.get_train_loss(**kwargs)
+                loss.backward()
+                opt.step()
+                loss_val = loss.item()
+                mlflow.log_metric("loss", loss_val, step=idx)
+                pbar.set_description(f"Epoch {idx}, loss: {loss_val:.3f}")
 
-        if losses:
-            plt.clf()
-            plt.plot(losses)
-            plt.xlabel("Step")
-            plt.ylabel("Loss")
-            plt.yscale("log")
-            plt.grid(
-                True, which="both", alpha=0.3
-            )  # Add grid for both major and minor ticks
-            plt.tight_layout()
-            plt.savefig(plot_path)
-            plt.close()
+            self.model.eval()
 
 
 class CFGTrainer(Trainer):
@@ -222,14 +212,14 @@ class TinyHARTrainer(Trainer):
         if save_path:
             if config is None:
                 config = self._default_checkpoint_config()
-            self._save_checkpoint(save_path, config)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_path = Path(tmpdir) / "tinyhar.pt"
+                self._save_checkpoint(str(tmp_path), config)
+                mlflow.log_artifact(str(tmp_path), artifact_path="checkpoints")
 
         if confusion_matrix_samples:
             cm = self._compute_confusion_matrix(confusion_matrix_samples, device)
-            if confusion_matrix_path is None:
-                confusion_matrix_path = str(
-                    Path("plots/confusion_matrices") / f"{name}.png"
-                )
-            self._save_confusion_matrix(
-                cm, confusion_matrix_path, class_names=class_names
-            )
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_path = Path(tmpdir) / f"{name}_cm.png"
+                self._save_confusion_matrix(cm, str(tmp_path), class_names=class_names)
+                mlflow.log_artifact(str(tmp_path), artifact_path="plots")
