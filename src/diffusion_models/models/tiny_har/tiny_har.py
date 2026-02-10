@@ -1,0 +1,37 @@
+import torch
+
+from diffusion_models.architectures.tiny_har import TinyHAR
+from diffusion_models.data.loaders import DataSampler
+from diffusion_models.data.synthetic import WaveSampler
+from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath
+from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
+from diffusion_models.trainers import CFGTrainer
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Initialize probability path
+path = GaussianConditionalProbabilityPath(
+    p_data=WaveSampler(),
+    p_simple_shape=[3, 100 * int(2 * torch.pi)],
+    alpha=LinearAlpha(),
+    beta=LinearBeta(),
+).to(device)
+
+activity_path = GaussianConditionalProbabilityPath(
+    p_data=DataSampler(dataset="wisdm"),
+    p_simple_shape=[3, 100],
+    alpha=LinearAlpha(),
+    beta=LinearBeta(),
+).to(device)
+
+# initialize model
+net = TinyHAR(
+    input_channels=3,
+    window_size=600,
+    num_classes=3,
+)
+
+trainer = CFGTrainer(path=path, model=net, eta=0.1, null_label=0)
+trainer.train(
+    num_epochs=1000, device=device, lr=1e-3, batch_size=250, name="tiny_har_training"
+)

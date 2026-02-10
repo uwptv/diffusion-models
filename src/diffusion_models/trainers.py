@@ -27,17 +27,17 @@ class Trainer(ABC):
         self,
         num_epochs: int,
         device: torch.device,
+        name: str,
         lr: float = 1e-3,
-        path: str = "training_loss.png",
         **kwargs,
     ) -> torch.Tensor:
         # Report model size
         size_b = model_size_b(self.model)
         print(f"Training model with size: {size_b / MiB:.3f} MiB")
 
-        plot_dir = Path("loss_plots")
+        plot_dir = Path("plots/losses")
         plot_dir.mkdir(parents=True, exist_ok=True)
-        plot_path = plot_dir / Path(path).name
+        plot_path = plot_dir / f"{name}.png"
 
         # Start
         self.model.to(device)
@@ -107,51 +107,3 @@ class CFGTrainer(Trainer):
         u_t_theta = self.model(x, t, y)  # (batch_size, c, x_dim)
         u_t = self.path.conditional_vector_field(x, z, t)  # (batch_size, c, x_dim)
         return torch.mean((u_t - u_t_theta) ** 2)
-
-    def train(
-        self,
-        num_epochs: int,
-        device: torch.device,
-        name: str,
-        lr: float = 1e-3,
-        **kwargs,
-    ) -> torch.Tensor:
-        # Report model size
-        size_b = model_size_b(self.model)
-        print(f"Training model with size: {size_b / MiB:.3f} MiB")
-
-        plot_dir = Path("plots/losses")
-        plot_dir.mkdir(parents=True, exist_ok=True)
-        plot_path = plot_dir / f"{name}.png"
-
-        # Start
-        self.model.to(device)
-        opt = self.get_optimizer(lr)
-        self.model.train()
-        losses = []
-
-        # Train loop
-        pbar = tqdm(enumerate(range(num_epochs)))
-        for idx, _ in pbar:
-            opt.zero_grad()
-            loss = self.get_train_loss(**kwargs)
-            loss.backward()
-            opt.step()
-            losses.append(loss.item())
-            pbar.set_description(f"Epoch {idx}, loss: {loss.item():.3f}")
-
-        # Finish
-        self.model.eval()
-
-        if losses:
-            plt.clf()
-            plt.plot(losses)
-            plt.xlabel("Step")
-            plt.ylabel("Loss")
-            plt.yscale("log")
-            plt.grid(
-                True, which="both", alpha=0.3
-            )  # Add grid for both major and minor ticks
-            plt.tight_layout()
-            plt.savefig(plot_path)
-            plt.close()
