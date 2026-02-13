@@ -1,9 +1,11 @@
 from abc import ABC
+from typing import List
 
 import torch
 
 from diffusion_models.architectures.blocks.base import Conditioner
-from diffusion_models.dynamics.base import ConditionalVectorField
+from diffusion_models.dynamics.base import CFGVectorFieldODE, ConditionalVectorField
+from diffusion_models.dynamics.simulators import EulerSimulator
 
 
 class UNet(ConditionalVectorField, ABC):
@@ -73,3 +75,63 @@ class UNet(ConditionalVectorField, ABC):
         x = self.final_conv(x)  # (bs, c, ...)
 
         return x
+
+    @torch.no_grad()
+    def sample(
+        self,
+        num_samples: int,
+        p_data_shape: List[int],
+        class_label: int | None = None,
+        num_timesteps: int = 100,
+        guidance_scale: float = 1.0,
+        null_class: int = 0,
+        device: torch.device = None,
+    ) -> torch.Tensor:
+        """
+        Draw samples from the diffusion model.
+
+        Args:
+            - num_samples: Number of samples to generate
+            - p_data_shape: Shape of the data to generate
+            - class_label: Class labels for conditional generation
+            - num_timesteps: Number of timesteps for ODE simulation
+            - guidance_scale: Classifier-free guidance scale (1.0 = no guidance)
+            - null_class: null class
+            - device: Device to run on
+
+        Returns:
+            - Generated samples, shape (num_samples, *p_data_shape)
+        """
+
+        if device is None:
+            device = next(self.parameters()).device
+
+        self.eval()
+
+        # Initialize from noise
+        x0 = torch.randn(num_samples, *p_data_shape, device=device)
+
+        # If not provided a class label, use null class
+        if class_label is None:
+            class_labels = torch.full(
+                (num_samples,), null_class, device=device, dtype=torch.long
+            )
+        else:
+            class_labels = torch.full(
+                (num_samples,), class_label, device=device, dtype=torch.long
+            )
+
+        # Create timesteps from t=0 to t=1
+        ts = torch.linspace(0, 1, num_timesteps, device=device)
+        ts = ts.reshape(1, -1, *([1] * (x0.ndim - 1)))  # (1, T, 1, ...)
+        ts = ts.expand(num_samples, -1, *([1] * (x0.ndim - 1)))  # (B, T, 1, ...)
+
+        # Create ODE and simulator
+        ode = CFGVectorFieldODE(self, guidance_scale=guidance_scale)
+        simulator = EulerSimulator(ode)
+
+        # Simulate
+        x1 = simulator.simulate(x0, ts, y=class_labels, null_class=null_class)
+        print("Generated samples shape:", x1.shape)
+
+        return x1

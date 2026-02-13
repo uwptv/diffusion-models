@@ -622,5 +622,3 @@ def visualize_generated_data_samples(
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
 
     plt.show()
-
-    plt.show()

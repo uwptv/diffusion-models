@@ -84,7 +84,7 @@ class WaveSampler(nn.Module, Sampleable):
         amplitudes: List[int] = [1, 2, 3],
         phase: float = 0.0,
         sample_rate: int = 100,
-        duration: int = int(2 * torch.pi),
+        duration: int = 1,
         seed: int | None = 42,
     ):
         super().__init__()

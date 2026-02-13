@@ -5,8 +5,8 @@ import torch
 import torch.nn as nn
 from torchvision import datasets, transforms
 from whar_datasets import (
+    KFoldSplitter,
     Loader,
-    LOSOSplitter,
     PostProcessingPipeline,
     PreProcessingPipeline,
     TorchAdapter,
@@ -73,7 +73,7 @@ class DataSampler(nn.Module, Sampleable):
         # create cfg for dataset
         dataset_id = WHARDatasetID(dataset)
         cfg = get_dataset_cfg(dataset_id)
-        # cfg.parallelize = True
+        cfg.parallelize = True
         cfg.window_time = window_time
         cfg.seed = seed
 
@@ -82,7 +82,7 @@ class DataSampler(nn.Module, Sampleable):
         activity_df, session_df, window_df = pre_pipeline.run()
 
         # create LOSO splits
-        splitter = LOSOSplitter(cfg)
+        splitter = KFoldSplitter(cfg)
         splits = splitter.get_splits(session_df, window_df)
         split = splits[0]
 

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import mlflow
 import mlflow.pytorch
 import torch
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 from torch import nn
 from tqdm import tqdm
 
@@ -191,6 +191,48 @@ class TinyHARTrainer(Trainer):
             labels=list(range(num_classes)) if num_classes is not None else None,
         )
 
+    def _compute_f1_score(
+        self, num_samples: int, device: torch.device
+    ) -> dict[str, float]:
+        """Compute F1 scores for the classifier.
+
+        Returns:
+            Dictionary with 'macro' and 'weighted' F1 scores.
+        """
+        x, labels = self.path.sample_conditioning_variable(num_samples)
+        labels = self._normalize_labels(labels)
+        x = x.to(device)
+
+        with torch.no_grad():
+            logits = self.model(x)
+            preds = torch.argmax(logits, dim=1).cpu()
+
+        labels_np = labels.cpu().numpy()
+        preds_np = preds.numpy()
+
+        return f1_score(labels_np, preds_np, average="macro"), f1_score(
+            labels_np, preds_np, average="weighted"
+        )
+
+    def _compute_accuracy(self, num_samples: int, device: torch.device) -> float:
+        """Compute classification accuracy.
+
+        Returns:
+            Accuracy score between 0 and 1.
+        """
+        x, labels = self.path.sample_conditioning_variable(num_samples)
+        labels = self._normalize_labels(labels)
+        x = x.to(device)
+
+        with torch.no_grad():
+            logits = self.model(x)
+            preds = torch.argmax(logits, dim=1).cpu()
+
+        labels_np = labels.cpu().numpy()
+        preds_np = preds.numpy()
+
+        return accuracy_score(labels_np, preds_np)
+
     def _save_confusion_matrix(
         self, cm, save_path: str, class_names: list[str] | None = None
     ):
@@ -221,7 +263,7 @@ class TinyHARTrainer(Trainer):
         confusion_matrix_samples: int | None = 1000,
         class_names: list[str] | None = None,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> str:
         run_id = super().train(
             num_epochs=num_epochs, device=device, name=name, lr=lr, **kwargs
         )
@@ -245,3 +287,14 @@ class TinyHARTrainer(Trainer):
                 tmp_path = Path(tmpdir) / f"{name}_cm.png"
                 self._save_confusion_matrix(cm, str(tmp_path), class_names=class_names)
                 mlflow.log_artifact(str(tmp_path), artifact_path="plots", run_id=run_id)
+
+        # Log F1 scores and accuracy
+        f1_score_weighted, f1_score_macro = self._compute_f1_score(
+            confusion_matrix_samples, device
+        )
+        accuracy_score = self._compute_accuracy(confusion_matrix_samples, device)
+        mlflow.log_metric("f1_score_weighted", f1_score_weighted, run_id=run_id)
+        mlflow.log_metric("f1_score_macro", f1_score_macro, run_id=run_id)
+        mlflow.log_metric("accuracy", accuracy_score, run_id=run_id)
+
+        return run_id

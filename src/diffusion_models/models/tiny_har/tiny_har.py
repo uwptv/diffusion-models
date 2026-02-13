@@ -11,7 +11,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Initialize probability path
 path = GaussianConditionalProbabilityPath(
     p_data=WaveSampler(),
-    p_simple_shape=[3, 100 * int(2 * torch.pi)],
+    p_simple_shape=[3, 100],
     alpha=LinearAlpha(),
     beta=LinearBeta(),
 ).to(device)
@@ -26,7 +26,7 @@ path = GaussianConditionalProbabilityPath(
 # initialize model
 net = TinyHAR(
     input_channels=3,
-    window_size=600,
+    window_size=100,
     num_classes=3,
 )
 
