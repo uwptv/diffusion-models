@@ -36,7 +36,7 @@ trainer.train(
     device=device,
     lr=1e-3,
     batch_size=250,
-    name="tiny_har_training",
+    name="tiny_har",
     save_path="checkpoints/tiny_har.pth",
     confusion_matrix_samples=2000,
     class_names=["amp1", "amp2", "amp3"],

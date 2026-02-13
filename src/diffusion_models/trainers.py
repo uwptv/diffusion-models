@@ -34,7 +34,10 @@ class Trainer(ABC):
         name: str,
         lr: float = 1e-3,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> str:
+        # Set up experiment tracking with MLflow
+        mlflow.set_experiment(experiment_name=name)
+
         # Report model size
         size_b = model_size_b(self.model)
         print(f"Training model with size: {size_b / MiB:.3f} MiB")
@@ -44,11 +47,22 @@ class Trainer(ABC):
         opt = self.get_optimizer(lr)
         self.model.train()
 
+        # Create a specific run name
+        run_name = f"{name}_{lr}_{num_epochs}epochs"
+
         # Train loop
-        with mlflow.start_run(run_name=name):
-            mlflow.log_param("lr", lr)
-            mlflow.log_param("num_epochs", num_epochs)
-            mlflow.log_param("model_size_mib", size_b / MiB)
+        with mlflow.start_run(run_name=run_name):
+            run_id = mlflow.active_run().info.run_id
+
+            # Create hyperparameters
+            params = {
+                "model_size_mib": size_b / MiB,
+                "lr": lr,
+                "num_epochs": num_epochs,
+            }
+
+            # Log them with MLflow
+            mlflow.log_params(params)
 
             pbar = tqdm(enumerate(range(num_epochs)))
             for idx, _ in pbar:
@@ -61,6 +75,8 @@ class Trainer(ABC):
                 pbar.set_description(f"Epoch {idx}, loss: {loss_val:.3f}")
 
             self.model.eval()
+
+        return run_id
 
 
 class CFGTrainer(Trainer):
@@ -203,11 +219,12 @@ class TinyHARTrainer(Trainer):
         save_path: str | None = None,
         config: dict | None = None,
         confusion_matrix_samples: int | None = 1000,
-        confusion_matrix_path: str | None = None,
         class_names: list[str] | None = None,
         **kwargs,
     ) -> torch.Tensor:
-        super().train(num_epochs=num_epochs, device=device, name=name, lr=lr, **kwargs)
+        run_id = super().train(
+            num_epochs=num_epochs, device=device, name=name, lr=lr, **kwargs
+        )
 
         if save_path:
             if config is None:
@@ -215,11 +232,16 @@ class TinyHARTrainer(Trainer):
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_path = Path(tmpdir) / "tinyhar.pt"
                 self._save_checkpoint(str(tmp_path), config)
-                mlflow.log_artifact(str(tmp_path), artifact_path="checkpoints")
+                # mlflow.log_artifact(str(tmp_path), artifact_path="checkpoints")
+                mlflow.pytorch.log_model(
+                    self.model,
+                    name="tiny_har",
+                    run_id=run_id,
+                )
 
         if confusion_matrix_samples:
             cm = self._compute_confusion_matrix(confusion_matrix_samples, device)
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_path = Path(tmpdir) / f"{name}_cm.png"
                 self._save_confusion_matrix(cm, str(tmp_path), class_names=class_names)
-                mlflow.log_artifact(str(tmp_path), artifact_path="plots")
+                mlflow.log_artifact(str(tmp_path), artifact_path="plots", run_id=run_id)
