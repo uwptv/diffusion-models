@@ -1,10 +1,12 @@
+import mlflow
 import torch
 
 from diffusion_models.architectures.tfilm_unet import TFiLMUNet
-from diffusion_models.data.loaders import DataSampler
 from diffusion_models.data.synthetic import WaveSampler
 from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath
 from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
+from diffusion_models.metrics.improved_pr import compute_improved_pr
+from diffusion_models.metrics.kid import compute_kid
 from diffusion_models.trainers import CFGTrainer
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -17,12 +19,12 @@ path = GaussianConditionalProbabilityPath(
     beta=LinearBeta(),
 ).to(device)
 
-activity_path = GaussianConditionalProbabilityPath(
-    p_data=DataSampler(dataset="wisdm"),
-    p_simple_shape=[3, 100],
-    alpha=LinearAlpha(),
-    beta=LinearBeta(),
-).to(device)
+# activity_path = GaussianConditionalProbabilityPath(
+#     p_data=DataSampler(dataset="wisdm"),
+#     p_simple_shape=[3, 100],
+#     alpha=LinearAlpha(),
+#     beta=LinearBeta(),
+# ).to(device)
 
 # initialize model
 net = TFiLMUNet(
@@ -34,7 +36,7 @@ net = TFiLMUNet(
     num_tfilm_blocks=4,
 )
 
-trainer = CFGTrainer(path=activity_path, model=net, eta=0.1, null_label=0)
+trainer = CFGTrainer(path=path, model=net, eta=0.1, null_label=0)
 run_id = trainer.train(
     num_epochs=1000,
     device=device,
@@ -50,14 +52,20 @@ run_id = trainer.train(
 
 # model is large at about 17.4 MiB parameters, trains resonably fast at about 7.7 it/s, empirically samples look pretty good after 1000 epochs, loss is about 0.45 after 1000 epochs
 
-# real_sensor_data, real_labels = path.p_data.sample(1000)
-# generated_sensor_data = net.sample(1000, p_data_shape=[3, 100])
+real_sensor_data, real_labels = path.p_data.sample(10000)
+generated_sensor_data = net.sample(10000, p_data_shape=[3, 100])
 
-# # Compute the KID metric
-# kid_dict = compute_kid_with_encoder(
-#     real_data=real_sensor_data,
-#     generated_data=generated_sensor_data,
-#     batch_size=250,
-# )
+# Compute the KID metric
+kid_dict = compute_kid(
+    real_data=real_sensor_data,
+    generated_data=generated_sensor_data,
+    batch_size=250,
+)
+pr_dict = compute_improved_pr(
+    real_data=real_sensor_data,
+    generated_data=generated_sensor_data,
+    batch_size=250,
+)
 
-# mlflow.log_metrics(kid_dict, run_id=run_id)
+mlflow.log_metrics(kid_dict, run_id=run_id)
+mlflow.log_metrics(pr_dict, run_id=run_id)

@@ -73,7 +73,7 @@ class DataSampler(nn.Module, Sampleable):
         # create cfg for dataset
         dataset_id = WHARDatasetID(dataset)
         cfg = get_dataset_cfg(dataset_id)
-        cfg.parallelize = True
+        # cfg.parallelize = True
         cfg.window_time = window_time
         cfg.seed = seed
 
