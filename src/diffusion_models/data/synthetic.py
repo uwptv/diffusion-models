@@ -83,7 +83,7 @@ class WaveSampler(nn.Module, Sampleable):
         self,
         amplitudes: List[int] = [1, 2, 3],
         phase: float = 0.0,
-        sample_rate: int = 100,
+        sample_rate: int = 128,
         duration: int = 1,
         seed: int | None = 42,
     ):

@@ -10,6 +10,7 @@ from .kid import compute_kid
 def compute_all_metrics(
     real_data: torch.Tensor,
     generated_data: torch.Tensor,
+    use_toy: bool,
     batch_size: int = 250,
 ) -> dict[str, float]:
     """
@@ -18,10 +19,8 @@ def compute_all_metrics(
     Args:
         real_data: Real data samples (N, C, L)
         generated_data: Generated data samples (M, C, L)
+        use_toy: Whether to use the toy TinyHAR model
         batch_size: Batch size for feature extraction
-        k_nearest: k for precision/recall and density/coverage
-        kid_subset_size: Subset size for KID computation
-        kid_num_subsets: Number of subsets for KID computation
 
     Returns:
         Dictionary with all metrics, ready for mlflow.log_metrics()
@@ -31,8 +30,12 @@ def compute_all_metrics(
 
     # Compute embeddings
     with torch.no_grad():
-        real_features = extract_features(real_data, batch_size=batch_size)
-        gen_features = extract_features(generated_data, batch_size=batch_size)
+        real_features = extract_features(
+            real_data, batch_size=batch_size, use_toy=use_toy
+        )
+        gen_features = extract_features(
+            generated_data, batch_size=batch_size, use_toy=use_toy
+        )
 
     # FID
     fid_dict = compute_fid(

@@ -393,9 +393,7 @@ class InitialConvolution(nn.Module):
             self.conv = nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1)
         else:
             self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
-        self.ada_group_norm = AdaGroupNorm(
-            num_groups=8, num_channels=out_channels, cond_dim=cond_dim
-        )
+        self.ada_group_norm = AdaGroupNorm(num_channels=out_channels, cond_dim=cond_dim)
         self.activation = get_activation(activation)
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:

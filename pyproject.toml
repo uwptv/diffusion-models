@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "fvcore>=0.1.5.post20221221",
     "matplotlib>=3.10.8",
     "mlflow>=3.9.0",
     "optuna>=4.7.0",

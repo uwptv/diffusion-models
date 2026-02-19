@@ -32,7 +32,7 @@ class Trainer(ABC):
         device: torch.device,
         lr: float,
         **kwargs,
-    ) -> str:
+    ):
         # Start
         self.model.to(device)
         opt = self.get_optimizer(lr)
@@ -130,7 +130,7 @@ class TinyHARTrainer(Trainer):
         super().__init__(model, **kwargs)
         self.path = path
 
-    def get_train_loss(self, batch_size: int):
+    def get_loss(self, batch_size: int, val_split: float):
         # Sample data points and labels
         x, labels = self.path.sample_conditioning_variable(
             batch_size
@@ -138,11 +138,20 @@ class TinyHARTrainer(Trainer):
         # Provide cross-entropy loss with class indices
         labels = (labels.squeeze(1) - 1).long()
 
+        # Split into training and validation sets
+        split_idx = int(batch_size * (1 - val_split))
+        x_train, x_val = x[:split_idx], x[split_idx:]
+        labels_train, labels_val = labels[:split_idx], labels[split_idx:]
+
         # Regress and output loss
-        pred = self.model(x)  # (batch_size, num_classes)
+        train_pred = self.model(x_train)  # (batch_size, num_classes)
+        val_pred = self.model(x_val)  # (batch_size, num_classes)
 
         # Provide cross-entropy loss with logits from the model and class indices from the data
-        return nn.CrossEntropyLoss()(pred, labels)
+        train_loss = nn.CrossEntropyLoss()(train_pred, labels_train)
+        val_loss = nn.CrossEntropyLoss()(val_pred, labels_val)
+
+        return train_loss, val_loss
 
     def _default_checkpoint_config(self) -> dict:
         config = {}
@@ -267,38 +276,42 @@ class TinyHARTrainer(Trainer):
         confusion_matrix_samples: int | None = 1000,
         class_names: list[str] | None = None,
         **kwargs,
-    ) -> str:
-        run_id = super().train(
-            num_epochs=num_epochs, device=device, name=name, lr=lr, **kwargs
-        )
+    ):
+        with mlflow.start_run(run_name=name):
+            run_id, val_loss = super().train(
+                num_epochs=num_epochs, device=device, lr=lr, **kwargs
+            )
 
-        if save_path:
-            if config is None:
-                config = self._default_checkpoint_config()
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmp_path = Path(tmpdir) / "tinyhar.pt"
-                self._save_checkpoint(str(tmp_path), config)
-                # mlflow.log_artifact(str(tmp_path), artifact_path="checkpoints")
-                mlflow.pytorch.log_model(
-                    self.model,
-                    name="tiny_har",
-                    run_id=run_id,
-                )
+            if save_path:
+                if config is None:
+                    config = self._default_checkpoint_config()
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    tmp_path = Path(tmpdir) / name
+                    self._save_checkpoint(str(tmp_path), config)
+                    mlflow.pytorch.log_model(
+                        self.model,
+                        name=name,
+                        run_id=run_id,
+                    )
 
-        if confusion_matrix_samples:
-            cm = self._compute_confusion_matrix(confusion_matrix_samples, device)
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmp_path = Path(tmpdir) / f"{name}_cm.png"
-                self._save_confusion_matrix(cm, str(tmp_path), class_names=class_names)
-                mlflow.log_artifact(str(tmp_path), artifact_path="plots", run_id=run_id)
+            if confusion_matrix_samples:
+                cm = self._compute_confusion_matrix(confusion_matrix_samples, device)
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    tmp_path = Path(tmpdir) / f"{name}_cm.png"
+                    self._save_confusion_matrix(
+                        cm, str(tmp_path), class_names=class_names
+                    )
+                    mlflow.log_artifact(
+                        str(tmp_path), artifact_path="plots", run_id=run_id
+                    )
 
-        # Log F1 scores and accuracy
-        f1_score_weighted, f1_score_macro = self._compute_f1_score(
-            confusion_matrix_samples, device
-        )
-        accuracy_score = self._compute_accuracy(confusion_matrix_samples, device)
-        mlflow.log_metric("f1_score_weighted", f1_score_weighted, run_id=run_id)
-        mlflow.log_metric("f1_score_macro", f1_score_macro, run_id=run_id)
-        mlflow.log_metric("accuracy", accuracy_score, run_id=run_id)
+            # Log F1 scores and accuracy
+            f1_score_weighted, f1_score_macro = self._compute_f1_score(
+                confusion_matrix_samples, device
+            )
+            accuracy_score = self._compute_accuracy(confusion_matrix_samples, device)
+            mlflow.log_metric("f1_score_weighted", f1_score_weighted, run_id=run_id)
+            mlflow.log_metric("f1_score_macro", f1_score_macro, run_id=run_id)
+            mlflow.log_metric("accuracy", accuracy_score, run_id=run_id)
 
-        return run_id
+            return run_id, val_loss
