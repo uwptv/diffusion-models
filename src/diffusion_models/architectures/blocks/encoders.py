@@ -52,7 +52,6 @@ class Encoder1D(nn.Module):
         channels_out: int,
         num_residual_layers: int,
         cond_dim: int,
-        num_groups: int = 8,
         activation: str = "silu",
     ):
         super().__init__()
@@ -65,9 +64,7 @@ class Encoder1D(nn.Module):
         self.downsample = nn.Conv1d(
             channels_in, channels_out, kernel_size=3, stride=2, padding=1
         )
-        self.norm = AdaGroupNorm(
-            num_groups=num_groups, num_channels=channels_out, cond_dim=cond_dim
-        )
+        self.norm = AdaGroupNorm(num_channels=channels_out, cond_dim=cond_dim)
         self.activation = get_activation(activation)
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:

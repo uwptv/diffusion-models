@@ -150,7 +150,6 @@ class ResidualLayer(nn.Module):
         self,
         channels: int,
         cond_dim: int,
-        num_groups: int = 8,
         activation: str = "silu",
         use_1d: bool = True,
     ):
@@ -160,13 +159,9 @@ class ResidualLayer(nn.Module):
         # Choose convolution type
         conv_cls = nn.Conv1d if use_1d else nn.Conv2d
 
-        self.norm1 = AdaGroupNorm(
-            num_groups=num_groups, num_channels=channels, cond_dim=cond_dim
-        )
+        self.norm1 = AdaGroupNorm(num_channels=channels, cond_dim=cond_dim)
         self.conv1 = conv_cls(channels, channels, kernel_size=3, padding=1)
-        self.norm2 = AdaGroupNorm(
-            num_groups=num_groups, num_channels=channels, cond_dim=cond_dim
-        )
+        self.norm2 = AdaGroupNorm(num_channels=channels, cond_dim=cond_dim)
         self.conv2 = conv_cls(channels, channels, kernel_size=3, padding=1)
 
         self.cond_adapter = nn.Sequential(
@@ -341,9 +336,11 @@ class AdaGroupNorm(nn.Module):
     conditioned on an external embedding.
     """
 
-    def __init__(self, num_groups: int, num_channels: int, cond_dim: int) -> None:
+    def __init__(self, num_channels: int, cond_dim: int) -> None:
         super().__init__()
 
+        # Use a max of 32 groups and a minimum of 8 groups, or channels//4 if that is in between
+        num_groups = min(32, max(8, num_channels // 4))
         self.group_norm = nn.GroupNorm(num_groups, num_channels, affine=False, eps=1e-6)
         self.linear = nn.Linear(cond_dim, 2 * num_channels)
         # outputs scale (γ) and shift (β)

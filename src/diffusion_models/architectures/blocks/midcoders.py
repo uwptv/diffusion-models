@@ -36,7 +36,7 @@ class Midcoder1D(nn.Module):
         super().__init__()
         self.res_blocks = nn.ModuleList(
             [
-                ResidualLayer(channels, cond_dim, use_1d=True, num_groups=channels)
+                ResidualLayer(channels, cond_dim, use_1d=True)
                 for _ in range(num_residual_layers)
             ]
         )

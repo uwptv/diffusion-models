@@ -1,5 +1,3 @@
-from typing import List
-
 import torch.nn as nn
 
 from diffusion_models.architectures.blocks.base import InitialConvolution
@@ -23,17 +21,23 @@ class StandardUNet(UNet):
 
     def __init__(
         self,
-        channels: List[int],
+        input_channels: int,
+        initial_channels: int,
+        levels: int,
         num_residual_layers: int,
-        cond_dim: int,
         num_classes: int,
-        input_channels: int = 1,
+        cond_dim: int,
     ):
         super().__init__(cond_dim, num_classes)
 
         self.init_conv = InitialConvolution(
-            input_channels, channels[0], cond_dim=cond_dim, use_1d=True
+            input_channels, initial_channels, cond_dim=cond_dim, use_1d=True
         )
+
+        channels = [initial_channels]
+        for _ in range(levels):
+            # Double channels at each level
+            channels.append(channels[-1] * 2)
 
         # Encoders and Decoders (use cond_dim for both t_embed_dim and y_embed_dim)
         encoders = []

@@ -54,7 +54,6 @@ class Decoder1D(nn.Module):
         channels_out: int,
         num_residual_layers: int,
         cond_dim: int,
-        num_groups: int = 8,
         activation: str = "silu",
     ):
         super().__init__()
@@ -68,7 +67,7 @@ class Decoder1D(nn.Module):
                 for _ in range(num_residual_layers)
             ]
         )
-        self.norm = AdaGroupNorm(num_groups, channels_out, cond_dim)
+        self.norm = AdaGroupNorm(num_channels=channels_out, cond_dim=cond_dim)
         self.activation = get_activation(activation)
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
