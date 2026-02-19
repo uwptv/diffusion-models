@@ -114,7 +114,11 @@ if __name__ == "__main__":
 
     mlflow.set_experiment("best_models_retrained")
 
-    with mlflow.start_run(run_name="standard_unet"):
+    with mlflow.start_run(run_name="standard_unet") as run:
+        run_id = run.info.run_id
+
+        mlflow.log_params(study.best_params, run_id=run_id)
+
         # Retrain best model on full training data and evaluate metrics
         model = StandardUNet(
             input_channels=3,
@@ -130,7 +134,7 @@ if __name__ == "__main__":
             eta=study.best_params["label_dropout_rate"],
             null_label=0,
         )
-        run_id, _ = trainer.train(
+        _, val_loss = trainer.train(
             num_epochs=study.best_params["num_epochs"],
             device=device,
             lr=study.best_params["learning_rate"],
@@ -138,20 +142,22 @@ if __name__ == "__main__":
             val_split=0.2,
         )
         # Log the best model
-        mlflow.pytorch.log_model(model, artifact_path="best_model")
-        mlflow.log_params(study.best_params, run_id=run_id)
+        mlflow.pytorch.log_model(model, artifact_path="best_model", run_id=run_id)
 
-    # Generate samples for evaluation
-    with torch.no_grad():
-        real_sensor_data, real_labels = path.p_data.sample(10000)
-        generated_sensor_data = model.sample(10000, p_data_shape=[3, 128])
+        # Log final validation loss
+        mlflow.log_metric("final_val_loss", val_loss, run_id=run_id)
 
-    # Compute metrics
-    metrics = compute_all_metrics(
-        real_data=real_sensor_data,
-        generated_data=generated_sensor_data,
-        use_toy=True,
-    )
+        # Generate samples for evaluation
+        with torch.no_grad():
+            real_sensor_data, real_labels = path.p_data.sample(10000)
+            generated_sensor_data = model.sample(10000, p_data_shape=[3, 128])
 
-    # Log metrics
-    mlflow.log_metrics(metrics, run_id=run_id)
+        # Compute metrics
+        metrics = compute_all_metrics(
+            real_data=real_sensor_data,
+            generated_data=generated_sensor_data,
+            use_toy=True,
+        )
+
+        # Log metrics
+        mlflow.log_metrics(metrics, run_id=run_id)
