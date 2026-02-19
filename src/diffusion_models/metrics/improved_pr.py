@@ -1,7 +1,5 @@
 import torch
 
-from .feature_encoding import extract_features
-
 
 def _kth_neighbor_distance(
     features: torch.Tensor, k: int, batch_size: int
@@ -56,7 +54,7 @@ def _coverage(
     return covered / n
 
 
-def _compute_improved_pr(
+def compute_improved_pr(
     real_features: torch.Tensor,
     gen_features: torch.Tensor,
     k: int = 3,
@@ -72,7 +70,7 @@ def _compute_improved_pr(
         batch_size: Batch size for chunked distance computation
 
     Returns:
-        {"precision": float, "recall": float}
+        precision, recall as floats in [0, 1]
     """
     real_radii = _kth_neighbor_distance(real_features, k, batch_size)
     gen_radii = _kth_neighbor_distance(gen_features, k, batch_size)
@@ -80,26 +78,4 @@ def _compute_improved_pr(
     precision = _coverage(gen_features, real_features, real_radii, batch_size)
     recall = _coverage(real_features, gen_features, gen_radii, batch_size)
 
-    return {"precision": precision, "recall": recall}
-
-
-def compute_improved_pr(
-    real_data: torch.Tensor,
-    generated_data: torch.Tensor,
-    batch_size: int = 250,
-    k: int = 3,
-    pr_batch_size: int = 1000,
-) -> dict[str, float]:
-    real_features = extract_features(
-        real_data, batch_size=batch_size
-    )  # (N, feature_dim)
-    gen_features = extract_features(
-        generated_data, batch_size=batch_size
-    )  # (M, feature_dim)
-
-    return _compute_improved_pr(
-        real_features=real_features,
-        gen_features=gen_features,
-        k=k,
-        batch_size=pr_batch_size,
-    )
+    return precision, recall

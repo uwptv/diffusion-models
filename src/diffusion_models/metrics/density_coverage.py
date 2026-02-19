@@ -1,9 +1,7 @@
 import torch
 
-from .feature_encoding import extract_features
 
-
-def _compute_density_coverage(
+def compute_density_coverage(
     real_features: torch.Tensor,
     gen_features: torch.Tensor,
     k: int = 5,
@@ -72,36 +70,3 @@ def _compute_density_coverage(
     coverage = covered / n_real
 
     return density, coverage
-
-
-def compute_density_coverage(
-    real_data: torch.Tensor,
-    generated_data: torch.Tensor,
-    batch_size: int = 250,
-    k: int = 5,
-    metric_batch_size: int = 1000,
-) -> dict[str, float]:
-    """
-    Compute Density & Coverage with automatic feature extraction.
-
-    Args:
-        real_data: Raw real data (N, C, L)
-        generated_data: Raw generated data (M, C, L)
-        batch_size: Batch size for encoder
-        k: kNN neighborhood size
-        metric_batch_size: Batch size for distance computations
-
-    Returns:
-        {"density": float, "coverage": float}
-    """
-    real_features = extract_features(real_data, batch_size=batch_size)
-    gen_features = extract_features(generated_data, batch_size=batch_size)
-
-    density, coverage = _compute_density_coverage(
-        real_features=real_features,
-        gen_features=gen_features,
-        k=k,
-        batch_size=metric_batch_size,
-    )
-
-    return {"density": density, "coverage": coverage}

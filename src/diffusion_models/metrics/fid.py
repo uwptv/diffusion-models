@@ -1,7 +1,5 @@
 import torch
 
-from .feature_encoding import extract_features
-
 
 def _compute_stats(features: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     n = features.shape[0]
@@ -22,7 +20,7 @@ def _sqrtm_sym(matrix: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
     return (eigvecs * sqrt_eigvals) @ eigvecs.T
 
 
-def _compute_fid(
+def compute_fid(
     real_features: torch.Tensor,
     gen_features: torch.Tensor,
     eps: float = 1e-6,
@@ -47,16 +45,3 @@ def _compute_fid(
         - 2.0 * torch.trace(sqrt_cov_prod)
     )
     return float(fid.item())
-
-
-def compute_fid(
-    real_data: torch.Tensor,
-    generated_data: torch.Tensor,
-    batch_size: int = 256,
-    **fid_kwargs,
-) -> dict[str, float]:
-    real_features = extract_features(real_data, batch_size=batch_size)
-    gen_features = extract_features(generated_data, batch_size=batch_size)
-
-    fid = _compute_fid(real_features, gen_features, **fid_kwargs)
-    return {"fid": fid}

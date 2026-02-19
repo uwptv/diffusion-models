@@ -12,7 +12,6 @@ from tqdm import tqdm
 
 from .dynamics.base import ConditionalVectorField
 from .dynamics.prob_paths import GaussianConditionalProbabilityPath
-from .utils.sizes import MiB, model_size_b
 
 
 class Trainer(ABC):
@@ -21,7 +20,7 @@ class Trainer(ABC):
         self.model = model
 
     @abstractmethod
-    def get_train_loss(self, **kwargs) -> torch.Tensor:
+    def get_loss(self, **kwargs) -> torch.Tensor:
         pass
 
     def get_optimizer(self, lr: float):
@@ -31,52 +30,39 @@ class Trainer(ABC):
         self,
         num_epochs: int,
         device: torch.device,
-        name: str,
-        lr: float = 1e-3,
+        lr: float,
         **kwargs,
     ) -> str:
-        # Set up experiment tracking with MLflow
-        mlflow.set_experiment(experiment_name=name)
-
-        # Report model size
-        size_b = model_size_b(self.model)
-        print(f"Training model with size: {size_b / MiB:.3f} MiB")
-
         # Start
         self.model.to(device)
         opt = self.get_optimizer(lr)
         self.model.train()
 
-        # Create a specific run name
-        run_name = f"{name}_{lr}_{num_epochs}epochs"
+        pbar = tqdm(enumerate(range(num_epochs)))
+        for idx, _ in pbar:
+            opt.zero_grad()
 
-        # Train loop
-        with mlflow.start_run(run_name=run_name):
-            run_id = mlflow.active_run().info.run_id
+            # Compute training and validation loss
+            train_loss, val_loss = self.get_loss(**kwargs)
 
-            # Create hyperparameters
-            params = {
-                "model_size_mib": size_b / MiB,
-                "lr": lr,
-                "num_epochs": num_epochs,
-            }
+            # Backprop on training loss and step optimizer
+            train_loss.backward()
+            opt.step()
 
-            # Log them with MLflow
-            mlflow.log_params(params)
+            # Log losses to mlflow
+            loss_train = train_loss.item()
+            loss_val = val_loss.item()
+            mlflow.log_metric("train_loss", loss_train, step=idx)
+            mlflow.log_metric("val_loss", loss_val, step=idx)
 
-            pbar = tqdm(enumerate(range(num_epochs)))
-            for idx, _ in pbar:
-                opt.zero_grad()
-                loss = self.get_train_loss(**kwargs)
-                loss.backward()
-                opt.step()
-                loss_val = loss.item()
-                mlflow.log_metric("loss", loss_val, step=idx)
-                pbar.set_description(f"Epoch {idx}, loss: {loss_val:.3f}")
+            # Update tqdm description
+            pbar.set_description(
+                f"Epoch {idx}, train_loss: {loss_train:.3f}, val_loss: {loss_val:.3f}"
+            )
 
-            self.model.eval()
+        self.model.eval()
 
-        return run_id
+        return mlflow.active_run().info.run_id, loss_val
 
 
 class CFGTrainer(Trainer):
@@ -94,7 +80,9 @@ class CFGTrainer(Trainer):
         self.path = path
         self.null_label = null_label
 
-    def get_train_loss(self, batch_size: int) -> torch.Tensor:
+    def get_loss(
+        self, batch_size: int, val_split: float = 0.2
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         # Step 1: Sample z,y from p_data
         z, y = self.path.sample_conditioning_variable(
             batch_size
@@ -110,10 +98,26 @@ class CFGTrainer(Trainer):
         )  # (batch_size, 1, x_dim)
         x = self.path.sample_conditional_path(z, t)  # (batch_size, c, x_dim)
 
-        # Step 4: Regress and output loss
-        u_t_theta = self.model(x, t, y)  # (batch_size, c, x_dim)
-        u_t = self.path.conditional_vector_field(x, z, t)  # (batch_size, c, x_dim)
-        return torch.mean((u_t - u_t_theta) ** 2)
+        # Step 4: Split into training and validation sets
+        split_idx = int(batch_size * (1 - val_split))
+        x_train, x_val = x[:split_idx], x[split_idx:]
+        t_train, t_val = t[:split_idx], t[split_idx:]
+        y_train, y_val = y[:split_idx], y[split_idx:]
+
+        # Step 5: Regress and output loss
+        u_t_theta = self.model(x_train, t_train, y_train)  # (batch_size, c, x_dim)
+        u_t = self.path.conditional_vector_field(
+            x_train, z[:split_idx], t_train
+        )  # (batch_size, c, x_dim)
+        train_loss = torch.mean((u_t - u_t_theta) ** 2)
+
+        u_t_theta = self.model(x_val, t_val, y_val)  # (batch_size, c, x_dim)
+        u_t = self.path.conditional_vector_field(
+            x_val, z[split_idx:], t_val
+        )  # (batch_size, c, x_dim)
+        val_loss = torch.mean((u_t - u_t_theta) ** 2)
+
+        return train_loss, val_loss
 
 
 class TinyHARTrainer(Trainer):

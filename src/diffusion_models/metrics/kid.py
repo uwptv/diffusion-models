@@ -1,7 +1,5 @@
 import torch
 
-from .feature_encoding import extract_features
-
 
 def _polynomial_mmd_kernel(
     x: torch.Tensor,
@@ -17,7 +15,7 @@ def _polynomial_mmd_kernel(
     return (gamma * (x @ y.T) + coef0) ** degree
 
 
-def _compute_kid(
+def compute_kid(
     real_features: torch.Tensor,
     gen_features: torch.Tensor,
     subset_size: int = 1000,
@@ -63,17 +61,3 @@ def _compute_kid(
 
     kid_scores = torch.tensor(kid_scores)
     return kid_scores.mean().item(), kid_scores.std().item()
-
-
-def compute_kid(
-    real_data: torch.Tensor,
-    generated_data: torch.Tensor,
-    batch_size: int = 256,
-    **kid_kwargs,
-) -> dict[str, float]:
-    real_features = extract_features(real_data, batch_size=batch_size)
-    gen_features = extract_features(generated_data, batch_size=batch_size)
-
-    kid_mean, kid_std = _compute_kid(real_features, gen_features, **kid_kwargs)
-
-    return {"kid_mean": kid_mean, "kid_std": kid_std}
