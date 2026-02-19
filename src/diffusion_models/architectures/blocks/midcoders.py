@@ -158,7 +158,7 @@ class TFiLMMidcoder(nn.Module):
             x = block(x, cond=cond_embed)
 
         # Apply TFiLM: (bs, c, L) -> (bs, c, L)
-        x = self.tfilm(x)
+        x = self.tfilm(x, cond=cond_embed)
 
         return x
 

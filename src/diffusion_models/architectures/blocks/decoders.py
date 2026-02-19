@@ -148,7 +148,7 @@ class TFiLMDecoder(nn.Module):
         x = self.activation(x)
 
         # Apply TFiLM: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
-        x = self.tfilm(x)
+        x = self.tfilm(x, cond_embed)
 
         # Pass through residual blocks: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
         for block in self.res_blocks:

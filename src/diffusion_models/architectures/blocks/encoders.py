@@ -146,7 +146,7 @@ class TFiLMEncoder(nn.Module):
         x = self.activation(x)
 
         # Apply TFiLM: (bs, c_out, L // 2) -> (bs, c_out, L // 2)
-        x = self.tfilm(x)
+        x = self.tfilm(x, cond_embed)
 
         return x
 

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from .base import SinusoidalEmbedding
+from .base import AdaGroupNorm, SinusoidalEmbedding
 
 
 class TFiLM(nn.Module):
@@ -21,10 +21,11 @@ class TFiLM(nn.Module):
         )
         self.to_params = nn.Linear(2 * self.rnn_hidden, 2 * channels)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         """
         Args:
         - x: (B, C, T)
+        - cond: (B, cond_dim)
         Returns:
         - out: (B, C, T) with TFiLM applied
         """
@@ -77,18 +78,21 @@ class TFiLMTransformer(nn.Module):
         self.num_blocks = num_blocks
         self.channels = channels
 
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=self.channels,
-            nhead=num_heads,
-            dim_feedforward=4 * channels,
-            batch_first=True,
-            activation="relu",
+        self.layers = nn.ModuleList(
+            [
+                _TFiLMTransformerLayer(
+                    d_model=self.channels,
+                    num_heads=num_heads,
+                    dim_feedforward=4 * channels,
+                    dropout=0.1,
+                )
+                for _ in range(num_layers)
+            ]
         )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.to_params = nn.Linear(channels, 2 * channels)
         self.pos_encoding = SinusoidalEmbedding(channels)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         # x: (B, C, T)
         B, C, T_orig = x.shape
 
@@ -115,7 +119,9 @@ class TFiLMTransformer(nn.Module):
         pooled = pooled + pos_emb
 
         # Transformer over blocks (sequence length = num_blocks)
-        transformer_out = self.transformer(pooled)  # (B, num_blocks, C)
+        transformer_out = pooled
+        for layer in self.layers:
+            transformer_out = layer(transformer_out, cond)
 
         # Affine params per block/channel
         params = self.to_params(transformer_out)  # (B, num_blocks, 2*C)
@@ -134,3 +140,27 @@ class TFiLMTransformer(nn.Module):
             out = out[:, :, :T_orig]
 
         return out
+
+
+class _TFiLMTransformerLayer(nn.Module):
+    def __init__(
+        self, d_model: int, num_heads: int, dim_feedforward: int, dropout: float = 0.0
+    ) -> None:
+        super().__init__()
+        self.self_attn = nn.MultiheadAttention(
+            embed_dim=d_model, num_heads=num_heads, dropout=dropout, batch_first=True
+        )
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+        self.norm1 = AdaGroupNorm(num_groups=8, num_channels=d_model, cond_dim=d_model)
+        self.norm2 = AdaGroupNorm(num_groups=8, num_channels=d_model, cond_dim=d_model)
+        self.dropout = nn.Dropout(dropout)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        attn_out, _ = self.self_attn(x, x, x, need_weights=False)
+        x = self.norm1(x + self.dropout1(attn_out), cond)
+        ff = self.linear2(self.dropout(torch.relu(self.linear1(x))))
+        x = self.norm2(x + self.dropout2(ff), cond)
+        return x

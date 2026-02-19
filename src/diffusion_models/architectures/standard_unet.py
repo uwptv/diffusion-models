@@ -45,4 +45,6 @@ class StandardUNet(UNet):
         self.decoders = nn.ModuleList(reversed(decoders))
 
         self.midcoder = Midcoder1D(channels[-1], num_residual_layers, cond_dim)
-        self.final_conv = nn.Conv1d(channels[0], 1, kernel_size=3, padding=1)
+        self.final_conv = nn.Conv1d(
+            channels[0], input_channels, kernel_size=3, padding=1
+        )
