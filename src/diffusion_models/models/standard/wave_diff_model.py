@@ -27,8 +27,8 @@ def objective(trial: optuna.Trial) -> float:
     levels = trial.suggest_int("levels", 2, 4)
     num_residual_layers = trial.suggest_int("num_residual_layers", 1, 3)
     cond_dim = trial.suggest_categorical("cond_dim", [32, 64, 96, 128])
-    eta = trial.suggest_float("eta", 0.05, 0.25, step=0.05)
-    lr = trial.suggest_float("lr", 1e-6, 1e-2, log=True)
+    eta = trial.suggest_float("label_dropout_rate", 0.05, 0.25, step=0.05)
+    lr = trial.suggest_float("learning_rate", 1e-6, 1e-2, log=True)
     batch_size = trial.suggest_categorical("batch_size", [32, 64, 128, 256])
     num_epochs = trial.suggest_int("num_epochs", 200, 1000)
 
@@ -112,7 +112,9 @@ if __name__ == "__main__":
     print("Best value:", study.best_value)
     print("Best params:", study.best_params)
 
-    with mlflow.start_run(run_name="best_model_retraining"):
+    mlflow.set_experiment("best_models_retrained")
+
+    with mlflow.start_run(run_name="standard_unet"):
         # Retrain best model on full training data and evaluate metrics
         model = StandardUNet(
             input_channels=3,
@@ -123,7 +125,10 @@ if __name__ == "__main__":
             cond_dim=study.best_params["cond_dim"],
         )
         trainer = CFGTrainer(
-            path=path, model=model, eta=study.best_params["label_dropout_rate"]
+            path=path,
+            model=model,
+            eta=study.best_params["label_dropout_rate"],
+            null_label=0,
         )
         run_id, _ = trainer.train(
             num_epochs=study.best_params["num_epochs"],
@@ -145,6 +150,7 @@ if __name__ == "__main__":
     metrics = compute_all_metrics(
         real_data=real_sensor_data,
         generated_data=generated_sensor_data,
+        use_toy=True,
     )
 
     # Log metrics

@@ -38,11 +38,11 @@ def compute_all_metrics(
         )
 
     # FID
-    fid_dict = compute_fid(
+    fid = compute_fid(
         real_features=real_features,
         gen_features=gen_features,
     )
-    metrics["fid"] = fid_dict["fid"]
+    metrics["fid"] = fid
 
     # KID
     kid_mean, kid_std = compute_kid(
