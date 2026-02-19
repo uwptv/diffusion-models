@@ -242,60 +242,97 @@ class ResidualLayer4D(ResidualLayer):
 
 class CrossChannelAttention(nn.Module):
     """
-    Self-attention mechanism across channels using feature vectors.
+    Cross-channel interaction using multi-head self-attention.
+    Applies attention across sensor channels to capture inter-channel dependencies.
 
-    Input: (batch_size, c_in, sequence_length, features)
-    Output: (batch_size, c_in, sequence_length, features)
-
-    For each timestep and batch, applies self-attention across the channel dimension,
-    where each channel is represented by its feature vector.
+    Args:
+        num_channels: Number of sensor channels (C)
+        feature_dim: Feature dimension per channel (F)
+        num_heads: Number of attention heads
+        num_layers: Number of transformer layers
+        dropout: Dropout probability
     """
 
     def __init__(
         self,
+        num_channels: int,
         feature_dim: int,
-        num_heads: int = 8,
+        num_heads: int = 4,
         num_layers: int = 1,
+        dropout: float = 0.0,
     ):
         super().__init__()
+        self.num_channels = num_channels
         self.feature_dim = feature_dim
+        self.num_heads = num_heads
+        self.num_layers = num_layers
 
-        # TransformerEncoderLayer expects: (seq_len, batch, embedding_dim)
-        # We'll treat channels as sequence length
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=feature_dim,
-            nhead=num_heads,
-            dim_feedforward=feature_dim * 4,
-            batch_first=True,
-            activation="relu",
+        # MultiheadAttention operates on feature_dim (last dimension)
+        self.attention_layers = nn.ModuleList(
+            [
+                nn.MultiheadAttention(
+                    embed_dim=feature_dim,
+                    num_heads=num_heads,
+                    dropout=dropout,
+                    batch_first=True,
+                )
+                for _ in range(num_layers)
+            ]
         )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+        # Layer norms for post-norm transformer
+        self.norms1 = nn.ModuleList(
+            [nn.LayerNorm(feature_dim) for _ in range(num_layers)]
+        )
+        self.norms2 = nn.ModuleList(
+            [nn.LayerNorm(feature_dim) for _ in range(num_layers)]
+        )
+
+        # Feedforward networks
+        self.ffns = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(feature_dim, 4 * feature_dim),
+                    nn.ReLU(),
+                    nn.Dropout(dropout),
+                    nn.Linear(4 * feature_dim, feature_dim),
+                    nn.Dropout(dropout),
+                )
+                for _ in range(num_layers)
+            ]
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-        - x: (batch_size, c_in, sequence_length, features)
+            x: (B, C, L, F) - batch, channels, sequence_length, features_per_channel
 
         Returns:
-        - output: (batch_size, c_in, sequence_length, features)
+            (B, C, L, F) - attended features
         """
-        batch_size, c_in, seq_len, feature_dim = x.shape
+        B, C, L, F = x.shape
 
-        # Reshape to (batch_size * sequence_length, c_in, features)
-        # This way we apply attention independently for each timestep
-        x = x.permute(0, 2, 1, 3)  # (batch_size, sequence_length, c_in, features)
-        x = x.reshape(
-            batch_size * seq_len, c_in, feature_dim
-        )  # (batch_size * sequence_length, c_in, features)
+        # Reshape to apply attention across channels at each time step
+        # (B, C, L, F) -> (B*L, C, F)
+        # This treats each timestep independently and applies cross-channel attention
+        x_reshaped = x.permute(0, 2, 1, 3).reshape(B * L, C, F)
 
-        # Apply self-attention across channels
-        x = self.transformer(x)  # (batch_size * sequence_length, c_in, features)
+        # Apply transformer layers
+        for attn, norm1, ffn, norm2 in zip(
+            self.attention_layers, self.norms1, self.ffns, self.norms2
+        ):
+            # Self-attention across channels (C is the sequence dimension)
+            attn_out, _ = attn(x_reshaped, x_reshaped, x_reshaped, need_weights=False)
+            x_reshaped = norm1(x_reshaped + attn_out)
 
-        # Reshape back to original format
-        x = x.reshape(batch_size, seq_len, c_in, feature_dim)
-        x = x.permute(0, 2, 1, 3)  # (batch_size, c_in, sequence_length, features)
+            # Feedforward with residual
+            ffn_out = ffn(x_reshaped)
+            x_reshaped = norm2(x_reshaped + ffn_out)
 
-        return x
+        # Reshape back: (B*L, C, F) -> (B, L, C, F) -> (B, C, L, F)
+        output = x_reshaped.reshape(B, L, C, F).permute(0, 2, 1, 3)
+
+        return output
 
 
 class AdaGroupNorm(nn.Module):
@@ -471,62 +508,64 @@ class DepthwiseConv1D(nn.Module):
 
 class DepthwiseConv1DExplicit(nn.Module):
     """
-    Depthwise convolution where each filter per channel is kept as a separate
-    feature dimension in the output.
+    Explicit depthwise separable 1D convolution where all channels use the same set of filters.
+    Uses batch dimension reshaping (TinyHAR-style) to apply shared weights across all input channels.
 
-    Standard depthwise conv: (bs, channels, L) -> (bs, filters_per_channel * channels, L)
-    This version: (bs, channels, L) -> (bs, channels, L, filters_per_channel)
+    Args:
+        channels_in: Number of input channels (C)
+        filters_per_channel: Number of filters to apply (F)
+        kernel_size: Size of the convolutional kernel
+        stride: Stride of the convolution
+        padding: Padding added to input
 
-    This makes the filter dimension explicit and separable for downstream processing.
+    Output shape: (B, C, F, L_out) where each channel produces F feature maps
     """
 
     def __init__(
         self,
-        channels: int,
+        channels_in: int,
         filters_per_channel: int,
-        kernel_size: int = 3,
-        padding: int = 1,
+        kernel_size: int,
         stride: int = 1,
+        padding: int = 0,
     ):
         super().__init__()
-        self.channels = channels
+        self.channels_in = channels_in
         self.filters_per_channel = filters_per_channel
 
-        # Still use grouped convolution, but we'll reshape the output
-        self.depthwise = nn.Conv1d(
-            channels,
-            filters_per_channel * channels,
+        # Single conv layer with shared weights for all channels
+        # Processes 1 input channel -> F output channels
+        self.depthwise_conv = nn.Conv1d(
+            in_channels=1,
+            out_channels=filters_per_channel,
             kernel_size=kernel_size,
-            padding=padding,
             stride=stride,
-            groups=channels,
+            padding=padding,
+            bias=False,
         )
 
-    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-        - x: (bs, channels, L)
-        - cond_embed: (bs, cond_dim)
+            x: Input tensor of shape (B, C, L)
+
         Returns:
-        - output: (bs, channels, L_out, filters_per_channel)
+            Output tensor of shape (B, C, L_out, F)
         """
-        bs, channels, L = x.shape
+        B, C, L = x.shape
 
-        # Apply depthwise convolution
-        x = self.depthwise(x)  # (bs, filters_per_channel * channels, L_out)
-        L_out = x.shape[-1]
+        # Reshape: (B, C, L) -> (B*C, 1, L)
+        # Each channel becomes a separate sample in the batch
+        x_reshaped = x.reshape(B * C, 1, L)
 
-        # Reshape to separate channel and filter dimensions
-        # From: (bs, filters_per_channel * channels, L_out)
-        # To: (bs, channels, filters_per_channel, L_out)
-        x = x.view(bs, channels, self.filters_per_channel, L_out)
+        # Apply shared convolution: (B*C, 1, L) -> (B*C, F, L_out)
+        features = self.depthwise_conv(x_reshaped)
 
-        # Move filter dimension to the end
-        # From: (bs, channels, filters_per_channel, L_out)
-        # To: (bs, channels, L_out, filters_per_channel)
-        x = x.permute(0, 1, 3, 2)
+        # Reshape back: (B*C, F, L_out) -> (B, C, L_out, F)
+        _, F, L_out = features.shape
+        output = features.reshape(B, C, F, L_out).permute(0, 1, 3, 2)
 
-        return x
+        return output
 
 
 class FeatureFusion(nn.Module):
