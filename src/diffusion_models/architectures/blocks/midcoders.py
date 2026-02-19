@@ -69,7 +69,7 @@ class Midcoder4D(Midcoder1D):
 
 class MidcoderTransformer1D(nn.Module):
     """
-    Midcoder with that uses self-attention via a transformer across the time domain for 1D signals. Used to capture long-range time dependencies.
+    Midcoder that uses self-attention via a transformer across the time domain for 1D signals. Used to capture long-range time dependencies.
     """
 
     def __init__(

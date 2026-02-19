@@ -13,7 +13,7 @@ def _compute_density_coverage(
     Compute Density and Coverage metrics.
 
     For each generated sample, find its k nearest real neighbors.
-    - Density: average distance to k-th nearest real neighbor (lower is better)
+    - Density: average number of real k-NN spheres that contain each generated sample (normalized by k)
     - Coverage: fraction of real samples that have a generated neighbor within their k-NN radius
 
     Args:
@@ -31,19 +31,7 @@ def _compute_density_coverage(
     if k >= n_real:
         raise ValueError(f"k={k} must be < n_real={n_real}")
 
-    # Compute k-NN distances from generated to real
-    gen_to_real_dists = []
-    for i in range(0, n_gen, batch_size):
-        gen_chunk = gen_features[i : i + batch_size]
-        dist = torch.cdist(gen_chunk, real_features)
-        # Get k smallest distances (k-th is at index k-1)
-        knn_dists = torch.topk(dist, k, largest=False).values[:, -1]
-        gen_to_real_dists.append(knn_dists)
-
-    gen_to_real_dists = torch.cat(gen_to_real_dists, dim=0)
-    density = gen_to_real_dists.mean().item()
-
-    # For coverage: compute k-NN radii of real samples
+    # For density & coverage: compute k-NN radii of real samples
     real_radii = []
     for i in range(0, n_real, batch_size):
         real_chunk = real_features[i : i + batch_size]
@@ -60,7 +48,18 @@ def _compute_density_coverage(
 
     real_radii = torch.cat(real_radii, dim=0)
 
-    # Check coverage: fraction of real samples with a generated neighbor
+    # Density: average count of real k-NN spheres that contain each generated sample, normalized by k
+    gen_density_counts = []
+    for i in range(0, n_gen, batch_size):
+        gen_chunk = gen_features[i : i + batch_size]
+        dist = torch.cdist(gen_chunk, real_features)  # (B, N_real)
+        counts = (dist <= real_radii.unsqueeze(0)).sum(dim=1)  # (B,)
+        gen_density_counts.append(counts)
+
+    gen_density_counts = torch.cat(gen_density_counts, dim=0)
+    density = (gen_density_counts.float().mean() / k).item()
+
+    # Coverage: fraction of real samples with a generated neighbor
     covered = 0
     for i in range(0, n_real, batch_size):
         real_chunk = real_features[i : i + batch_size]
