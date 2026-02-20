@@ -72,14 +72,14 @@ def objective(trial: optuna.Trial) -> float:
     with mlflow.start_run(run_name=f"trial_{trial.number}", nested=True):
         mlflow.log_params(
             {
+                "model_size_MiB": f"{model_size:.2f}",
+                "flops_giga": f"{giga_flops:.5f}",
                 "initial_channels": initial_channels,
                 "levels": levels,
                 "num_residual_layers": num_residual_layers,
                 "cond_dim": cond_dim,
                 "label_dropout_rate": f"{eta:.2f}",
                 "learning_rate": f"{lr:.3}",
-                "model_size_MiB": f"{model_size:.2f}",
-                "flops_giga": f"{giga_flops:.3f}",
             }
         )
 
@@ -102,7 +102,7 @@ if __name__ == "__main__":
     mlflow.set_experiment("standard_unet")
 
     study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=20)
+    study.optimize(objective, n_trials=50)
 
     print("Best trial:", study.best_trial.number)
     print("Best value:", study.best_value)
@@ -144,25 +144,37 @@ if __name__ == "__main__":
 
         # Generate samples for evaluation
         with torch.no_grad():
-            # Generate a large number of samples per class for more stable metric estimates
-            generated_sensor_data = []
-            real_sensor_data = []
-            for class_idx in range(1, 4):
-                # Sample real data for this class
-                real_sensor_data_per_class, real_labels = path.p_data.sample(
-                    5000, class_idx=class_idx
-                )
-                real_sensor_data.append(real_sensor_data_per_class)
+            guidance_scales = [2.0, 3.0, 4.0]
+            guidance_real_data = []
+            guidance_generated_data = []
 
-                # Sample generated data for this class
-                generated_sensor_data.append(
-                    model.sample(5000, p_data_shape=[3, 128], class_idx=class_idx)
-                )
+            # Sample real data once for all guidance scales
+            real_data_all_classes = []
+            for class_idx in range(1, 4):
+                real_sensor_data, _ = path.p_data.sample(10000, class_idx=class_idx)
+                real_data_all_classes.append(real_sensor_data)
+
+            # Append the real data for all classes as a single entry in the guidance_real_data list
+            guidance_real_data.append(real_data_all_classes)
+
+            # Generate samples for each guidance scale
+            for guidance_scale in guidance_scales:
+                generated_per_scale = [
+                    model.sample(
+                        10000,
+                        p_data_shape=[3, 128],
+                        class_idx=class_idx,
+                        guidance_scale=guidance_scale,
+                    )
+                    for class_idx in range(1, 4)
+                ]
+                guidance_generated_data.append(generated_per_scale)
 
         # Compute metrics
         metrics = compute_all_metrics(
-            real_data=real_sensor_data,
-            generated_data=generated_sensor_data,
+            real_data=guidance_real_data[0],
+            generated_data=guidance_generated_data,
+            used_guidance_scales=guidance_scales,
             use_toy=True,
         )
 
