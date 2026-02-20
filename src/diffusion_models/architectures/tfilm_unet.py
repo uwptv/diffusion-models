@@ -99,6 +99,7 @@ class TFiLMUNetTransformer(UNet):
         num_tfilm_blocks: int,
         num_transformer_heads: int,
         num_transformer_layers: int,
+        ffn_dim_multiplier: int,
     ):
         super().__init__(cond_dim, num_classes)
         self.init_conv = InitialConvolution(
@@ -123,6 +124,7 @@ class TFiLMUNetTransformer(UNet):
                     num_tfilm_blocks,
                     num_transformer_heads,
                     num_transformer_layers,
+                    ffn_dim_multiplier,
                 )
             )
             decoders.append(
@@ -134,6 +136,7 @@ class TFiLMUNetTransformer(UNet):
                     num_tfilm_blocks,
                     num_transformer_heads,
                     num_transformer_layers,
+                    ffn_dim_multiplier,
                 )
             )
         self.encoders = nn.ModuleList(encoders)
@@ -146,6 +149,7 @@ class TFiLMUNetTransformer(UNet):
             num_tfilm_blocks,
             num_transformer_heads,
             num_transformer_layers,
+            ffn_dim_multiplier,
         )
         self.final_conv = nn.Conv1d(
             channels[0], input_channels, kernel_size=3, padding=1

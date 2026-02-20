@@ -77,6 +77,7 @@ class TFiLMTransformer(nn.Module):
         channels: int,
         num_heads: int,
         num_layers: int,
+        ffn_dim_multiplier: int,
         dropout: float = 0.0,
     ):
         super().__init__()
@@ -88,7 +89,7 @@ class TFiLMTransformer(nn.Module):
                 _TFiLMTransformerLayer(
                     d_model=self.channels,
                     num_heads=num_heads,
-                    dim_feedforward=4 * channels,
+                    dim_feedforward=ffn_dim_multiplier * channels,
                     dropout=dropout,
                 )
                 for _ in range(num_layers)

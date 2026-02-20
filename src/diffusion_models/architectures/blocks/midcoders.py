@@ -120,6 +120,7 @@ class TransFiLMMidcoder(TFiLMMidcoder):
         num_tfilm_blocks: int,
         number_transformer_heads: int,
         num_transformer_layers: int,
+        ffn_dim_multiplier: int,
         dropout: float = 0.0,
     ):
         super().__init__(
@@ -132,7 +133,11 @@ class TransFiLMMidcoder(TFiLMMidcoder):
             num_layers_rnn=1,
         )
         self.tfilm = TFiLMTransformer(
-            num_tfilm_blocks, channels, number_transformer_heads, num_transformer_layers
+            num_tfilm_blocks,
+            channels,
+            number_transformer_heads,
+            num_transformer_layers,
+            ffn_dim_multiplier,
         )
 
 

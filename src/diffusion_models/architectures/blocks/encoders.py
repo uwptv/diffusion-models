@@ -151,6 +151,7 @@ class TransFiLMEncoder(TFiLMEncoder):
         num_tfilm_blocks: int,
         num_transformer_heads: int,
         num_transformer_layers: int,
+        ffn_dim_multiplier: int,
         activation: str = "silu",
     ):
         super().__init__(
@@ -169,6 +170,7 @@ class TransFiLMEncoder(TFiLMEncoder):
             num_blocks=num_tfilm_blocks,
             num_heads=num_transformer_heads,
             num_layers=num_transformer_layers,
+            ffn_dim_multiplier=ffn_dim_multiplier,
         )
 
 

@@ -2,7 +2,7 @@ import mlflow
 import optuna
 import torch
 
-from diffusion_models.architectures.tfilm_unet import TFiLMUNet
+from diffusion_models.architectures.tfilm_unet import TFiLMUNetTransformer
 from diffusion_models.data.synthetic import WaveSampler
 from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath
 from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
@@ -46,11 +46,14 @@ def objective(trial: optuna.Trial) -> float:
     batch_size = trial.suggest_categorical("batch_size", [32, 64, 128, 256])
     num_epochs = trial.suggest_int("num_epochs", 200, 1000)
     num_tfilm_blocks = trial.suggest_categorical("num_tfilm_blocks", [2, 4, 8, 16])
-    hidden_size_rnn = trial.suggest_categorical("hidden_size_rnn", [32, 64, 128])
-    num_layers_rnn = trial.suggest_int("num_layers_rnn", 1, 3)
+    num_transformer_heads = trial.suggest_categorical(
+        "num_transformer_heads", [1, 2, 4, 8]
+    )
+    num_transformer_layers = trial.suggest_int("num_transformer_layers", 1, 4)
+    ffn_dim_multiplier = trial.suggest_categorical("ffn_dim_multiplier", [1, 2, 4])
 
     # Model & trainer
-    net = TFiLMUNet(
+    net = TFiLMUNetTransformer(
         input_channels=3,
         initial_channels=initial_channels,
         levels=levels,
@@ -58,8 +61,9 @@ def objective(trial: optuna.Trial) -> float:
         num_classes=3,
         cond_dim=cond_dim,
         num_tfilm_blocks=num_tfilm_blocks,
-        hidden_size_rnn=hidden_size_rnn,
-        num_layers_rnn=num_layers_rnn,
+        num_transformer_heads=num_transformer_heads,
+        num_transformer_layers=num_transformer_layers,
+        ffn_dim_multiplier=ffn_dim_multiplier,
     )
     trainer = CFGTrainer(path=path, model=net, eta=eta, null_label=0)
 
@@ -104,6 +108,10 @@ def objective(trial: optuna.Trial) -> float:
                 "num_epochs": num_epochs,
                 "model_size_MiB": f"{model_size:.2f}",
                 "flops_giga": f"{giga_flops:.3f}",
+                "num_tfilm_blocks": num_tfilm_blocks,
+                "num_transformer_heads": num_transformer_heads,
+                "num_transformer_layers": num_transformer_layers,
+                "ffn_dim_multiplier": ffn_dim_multiplier,
             }
         )
 
@@ -123,7 +131,7 @@ def objective(trial: optuna.Trial) -> float:
 
 
 if __name__ == "__main__":
-    mlflow.set_experiment("standard_tfilm_unet")
+    mlflow.set_experiment("transformer_tfilm_unet")
 
     study = optuna.create_study(direction="minimize")
     study.optimize(objective, n_trials=30)
@@ -134,19 +142,23 @@ if __name__ == "__main__":
 
     mlflow.set_experiment("best_models_retrained")
 
-    with mlflow.start_run(run_name="standard_tfilm_unet") as run:
+    with mlflow.start_run(run_name="transformer_tfilm_unet") as run:
         run_id = run.info.run_id
 
         mlflow.log_params(study.best_params, run_id=run_id)
 
         # Retrain best model on full training data and evaluate metrics
-        model = TFiLMUNet(
+        model = TFiLMUNetTransformer(
             input_channels=3,
             initial_channels=study.best_params["initial_channels"],
             levels=study.best_params["levels"],
             num_residual_layers=study.best_params["num_residual_layers"],
             num_classes=3,
             cond_dim=study.best_params["cond_dim"],
+            num_tfilm_blocks=study.best_params["num_tfilm_blocks"],
+            num_transformer_heads=study.best_params["num_transformer_heads"],
+            num_transformer_layers=study.best_params["num_transformer_layers"],
+            ffn_dim_multiplier=study.best_params["ffn_dim_multiplier"],
         )
         trainer = CFGTrainer(
             path=path,
