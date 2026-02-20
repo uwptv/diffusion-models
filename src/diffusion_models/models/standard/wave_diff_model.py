@@ -23,14 +23,12 @@ path = GaussianConditionalProbabilityPath(
 
 def objective(trial: optuna.Trial) -> float:
     # Hyperparameter search space
-    initial_channels = trial.suggest_categorical("initial_channels", [16, 32, 48, 64])
-    levels = trial.suggest_int("levels", 2, 4)
-    num_residual_layers = trial.suggest_int("num_residual_layers", 1, 3)
-    cond_dim = trial.suggest_categorical("cond_dim", [32, 64, 96, 128])
-    eta = trial.suggest_float("label_dropout_rate", 0.05, 0.25, step=0.05)
-    lr = trial.suggest_float("learning_rate", 1e-6, 1e-2, log=True)
-    batch_size = trial.suggest_categorical("batch_size", [32, 64, 128, 256])
-    num_epochs = trial.suggest_int("num_epochs", 200, 1000)
+    initial_channels = trial.suggest_categorical("initial_channels", [4, 8, 16])
+    levels = trial.suggest_int("levels", 1, 2)
+    num_residual_layers = trial.suggest_int("num_residual_layers", 1, 2)
+    cond_dim = trial.suggest_categorical("cond_dim", [48, 64])
+    eta = trial.suggest_categorical("label_dropout_rate", [0.1, 0.2])
+    lr = trial.suggest_categorical("learning_rate", [1e-4, 5e-4, 1e-3])
 
     # Model & trainer
     net = StandardUNet(
@@ -41,7 +39,7 @@ def objective(trial: optuna.Trial) -> float:
         num_classes=3,
         cond_dim=cond_dim,
     )
-    trainer = CFGTrainer(path=path, model=net, eta=eta, null_label=0)
+    trainer = CFGTrainer(path=path, model=net, eta=eta)
 
     # Skip models that are too large to train
     model_size = model_size_b(net) / MiB
@@ -59,7 +57,7 @@ def objective(trial: optuna.Trial) -> float:
     # Skip models that have too many GFLOPs for training
     flops = count_flops(net, channels=3, seq_len=128)
     giga_flops = flops / GigaFLOP
-    MAX_FLOPS = 100
+    MAX_FLOPS = 1
     if giga_flops > MAX_FLOPS:
         with mlflow.start_run(
             run_name=f"trial_{trial.number}_pruned_flops", nested=True
@@ -80,8 +78,6 @@ def objective(trial: optuna.Trial) -> float:
                 "cond_dim": cond_dim,
                 "label_dropout_rate": f"{eta:.2f}",
                 "learning_rate": f"{lr:.3}",
-                "batch_size": batch_size,
-                "num_epochs": num_epochs,
                 "model_size_MiB": f"{model_size:.2f}",
                 "flops_giga": f"{giga_flops:.3f}",
             }
@@ -89,10 +85,10 @@ def objective(trial: optuna.Trial) -> float:
 
         # Train and get validation loss
         run_id, val_loss = trainer.train(
-            num_epochs=num_epochs,
+            num_epochs=1000,
             device=device,
             lr=lr,
-            batch_size=batch_size,
+            batch_size=128,
             val_split=0.2,  # Use 20% of data for validation
         )
 
@@ -132,13 +128,12 @@ if __name__ == "__main__":
             path=path,
             model=model,
             eta=study.best_params["label_dropout_rate"],
-            null_label=0,
         )
         _, val_loss = trainer.train(
-            num_epochs=study.best_params["num_epochs"],
+            num_epochs=1000,
             device=device,
             lr=study.best_params["learning_rate"],
-            batch_size=study.best_params["batch_size"],
+            batch_size=128,
             val_split=0.2,
         )
         # Log the best model
@@ -149,8 +144,20 @@ if __name__ == "__main__":
 
         # Generate samples for evaluation
         with torch.no_grad():
-            real_sensor_data, real_labels = path.p_data.sample(10000)
-            generated_sensor_data = model.sample(10000, p_data_shape=[3, 128])
+            # Generate a large number of samples per class for more stable metric estimates
+            generated_sensor_data = []
+            real_sensor_data = []
+            for class_idx in range(1, 4):
+                # Sample real data for this class
+                real_sensor_data_per_class, real_labels = path.p_data.sample(
+                    5000, class_idx=class_idx
+                )
+                real_sensor_data.append(real_sensor_data_per_class)
+
+                # Sample generated data for this class
+                generated_sensor_data.append(
+                    model.sample(5000, p_data_shape=[3, 128], class_idx=class_idx)
+                )
 
         # Compute metrics
         metrics = compute_all_metrics(

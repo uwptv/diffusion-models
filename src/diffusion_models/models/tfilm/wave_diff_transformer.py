@@ -37,20 +37,20 @@ path = GaussianConditionalProbabilityPath(
 
 def objective(trial: optuna.Trial) -> float:
     # Hyperparameter search space
-    initial_channels = trial.suggest_categorical("initial_channels", [16, 32, 48, 64])
-    levels = trial.suggest_int("levels", 2, 4)
-    num_residual_layers = trial.suggest_int("num_residual_layers", 1, 3)
-    cond_dim = trial.suggest_categorical("cond_dim", [32, 64, 96, 128])
-    eta = trial.suggest_float("label_dropout_rate", 0.05, 0.25, step=0.05)
-    lr = trial.suggest_float("learning_rate", 1e-6, 1e-2, log=True)
-    batch_size = trial.suggest_categorical("batch_size", [32, 64, 128, 256])
-    num_epochs = trial.suggest_int("num_epochs", 200, 1000)
-    num_tfilm_blocks = trial.suggest_categorical("num_tfilm_blocks", [8, 16])
+    initial_channels = trial.suggest_categorical("initial_channels", [4, 8, 16])
+    levels = trial.suggest_int("levels", 1, 2)
+    num_residual_layers = trial.suggest_int("num_residual_layers", 1, 2)
+    cond_dim = trial.suggest_categorical("cond_dim", [48, 64])
+    eta = trial.suggest_categorical("label_dropout_rate", [0.1, 0.2])
+    lr = trial.suggest_categorical("learning_rate", [1e-4, 5e-4, 1e-3])
+    num_tfilm_blocks = trial.suggest_categorical(
+        "num_tfilm_blocks", [8, 16]
+    )  # adapt constraint to more possible values
     num_transformer_heads = trial.suggest_categorical(
-        "num_transformer_heads", [1, 2, 4, 8]
+        "num_transformer_heads", [1, 2, 4]
     )
-    num_transformer_layers = trial.suggest_int("num_transformer_layers", 1, 4)
-    ffn_dim_multiplier = trial.suggest_categorical("ffn_dim_multiplier", [1, 2, 4])
+    num_transformer_layers = trial.suggest_int("num_transformer_layers", 1, 1)
+    ffn_dim_multiplier = trial.suggest_categorical("ffn_dim_multiplier", [2])
 
     # Model & trainer
     net = TFiLMUNetTransformer(
@@ -106,8 +106,6 @@ def objective(trial: optuna.Trial) -> float:
                 "cond_dim": cond_dim,
                 "label_dropout_rate": f"{eta:.2f}",
                 "learning_rate": f"{lr:.3}",
-                "batch_size": batch_size,
-                "num_epochs": num_epochs,
                 "num_tfilm_blocks": num_tfilm_blocks,
                 "num_transformer_heads": num_transformer_heads,
                 "num_transformer_layers": num_transformer_layers,
@@ -117,10 +115,10 @@ def objective(trial: optuna.Trial) -> float:
 
         # Train and get validation loss
         run_id, val_loss = trainer.train(
-            num_epochs=num_epochs,
+            num_epochs=1000,
             device=device,
             lr=lr,
-            batch_size=batch_size,
+            batch_size=128,
             val_split=0.2,  # Use 20% of data for validation
         )
 
@@ -167,10 +165,10 @@ if __name__ == "__main__":
             null_label=0,
         )
         _, val_loss = trainer.train(
-            num_epochs=study.best_params["num_epochs"],
+            num_epochs=1000,
             device=device,
             lr=study.best_params["learning_rate"],
-            batch_size=study.best_params["batch_size"],
+            batch_size=128,
             val_split=0.2,
         )
         # Log the best model

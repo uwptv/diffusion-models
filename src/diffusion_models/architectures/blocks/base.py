@@ -340,7 +340,7 @@ class AdaGroupNorm(nn.Module):
         super().__init__()
 
         # Use a max of 32 groups and a minimum of 8 groups, or channels//4 if that is in between
-        num_groups = min(32, max(8, num_channels // 4))
+        num_groups = min(32, max(4, num_channels // 4))
         self.group_norm = nn.GroupNorm(num_groups, num_channels, affine=False, eps=1e-6)
         self.linear = nn.Linear(cond_dim, 2 * num_channels)
         # outputs scale (γ) and shift (β)

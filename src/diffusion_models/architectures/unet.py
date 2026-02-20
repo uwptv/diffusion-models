@@ -81,10 +81,9 @@ class UNet(ConditionalVectorField, ABC):
         self,
         num_samples: int,
         p_data_shape: List[int],
-        class_label: int | None = None,
+        class_idx: int | None = None,
         num_timesteps: int = 30,
         guidance_scale: float = 1.0,
-        null_class: int = 0,
         device: torch.device = None,
     ) -> torch.Tensor:
         """
@@ -93,7 +92,7 @@ class UNet(ConditionalVectorField, ABC):
         Args:
             - num_samples: Number of samples to generate
             - p_data_shape: Shape of the data to generate
-            - class_label: Class labels for conditional generation
+            - class_idx: Class index for conditional generation
             - num_timesteps: Number of timesteps for ODE simulation
             - guidance_scale: Classifier-free guidance scale (1.0 = no guidance)
             - null_class: null class
@@ -112,13 +111,13 @@ class UNet(ConditionalVectorField, ABC):
         x0 = torch.randn(num_samples, *p_data_shape, device=device)
 
         # If not provided a class label, use null class
-        if class_label is None:
+        if class_idx is None:
             class_labels = torch.full(
-                (num_samples,), null_class, device=device, dtype=torch.long
+                (num_samples,), 0, device=device, dtype=torch.long
             )
         else:
             class_labels = torch.full(
-                (num_samples,), class_label, device=device, dtype=torch.long
+                (num_samples,), class_idx, device=device, dtype=torch.long
             )
 
         # Create timesteps from t=0 to t=1
@@ -131,7 +130,6 @@ class UNet(ConditionalVectorField, ABC):
         simulator = EulerSimulator(ode)
 
         # Simulate
-        x1 = simulator.simulate(x0, ts, y=class_labels, null_class=null_class)
-        print("Generated samples shape:", x1.shape)
+        x1 = simulator.simulate(x0, ts, y=class_labels)
 
         return x1

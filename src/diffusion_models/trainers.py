@@ -71,14 +71,12 @@ class CFGTrainer(Trainer):
         path: GaussianConditionalProbabilityPath,
         model: ConditionalVectorField,
         eta: float,
-        null_label,
         **kwargs,
     ):
         assert eta > 0 and eta < 1
         super().__init__(model, **kwargs)
         self.eta = eta
         self.path = path
-        self.null_label = null_label
 
     def get_loss(
         self, batch_size: int, val_split: float = 0.2
@@ -88,9 +86,9 @@ class CFGTrainer(Trainer):
             batch_size
         )  # z shape (batch_size, c, x_dim), y shape (batch_size, 1)
 
-        # Step 2: Set each label to the null class with probability eta
+        # Step 2: Set each label to the null class (index 0) with probability eta
         mask = torch.rand(batch_size) < self.eta
-        y[mask] = self.null_label
+        y[mask] = 0
 
         # Step 3: Sample t and x
         t = torch.rand((batch_size,) + (1,) * (z.ndim - 1)).to(
