@@ -67,71 +67,15 @@ class Midcoder4D(Midcoder1D):
         )
 
 
-class MidcoderTransformer1D(nn.Module):
-    """
-    Midcoder that uses self-attention via a transformer across the time domain for 1D signals. Used to capture long-range time dependencies.
-    """
-
-    def __init__(
-        self,
-        channels: int,
-        num_residual_layers: int,
-        num_transformer_layers: int,
-        cond_dim: int,
-        nhead: int = 8,
-        dropout: float = 0.0,
-    ):
-        super().__init__()
-        self.res_blocks = nn.ModuleList(
-            [
-                ResidualLayer(channels, cond_dim, use_1d=True)
-                for _ in range(num_residual_layers)
-            ]
-        )
-
-        self.transformer_layers = nn.ModuleList(
-            [
-                _MidcoderTransformerLayer(
-                    d_model=channels,
-                    num_heads=nhead,
-                    dim_feedforward=4 * channels,
-                    dropout=dropout,
-                )
-                for _ in range(num_transformer_layers)
-            ]
-        )
-
-    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-        - x: (bs, c, L)
-        - cond_embed: (bs, cond_dim)
-        """
-        # Residual blocks first: (bs, c, L) -> (bs, c, L)
-        for block in self.res_blocks:
-            x = block(x, cond_embed)
-
-        # Reshape for transformer: (bs, c, L) -> (bs, L, c)
-        x = x.transpose(1, 2)
-
-        # Self-attention: (bs, L, c) -> (bs, L, c)
-        for layer in self.transformer_layers:
-            x = layer(x)
-
-        # Reshape back: (bs, L, c) -> (bs, c, L)
-        x = x.transpose(1, 2)
-
-        return x
-
-
 class TFiLMMidcoder(nn.Module):
     def __init__(
         self,
         channels: int,
         num_residual_layers: int,
-        num_tfilm_blocks: int,
         cond_dim: int,
-        use_transformer: bool = False,
+        num_tfilm_blocks: int,
+        hidden_size_rnn: int,
+        num_layers_rnn: int,
     ):
         super().__init__()
         self.res_blocks = nn.ModuleList(
@@ -140,17 +84,12 @@ class TFiLMMidcoder(nn.Module):
                 for _ in range(num_residual_layers)
             ]
         )
-        if use_transformer:
-            self.tfilm = TFiLMTransformer(
-                num_blocks=num_tfilm_blocks,
-                channels=channels,
-                num_heads=8,
-                num_layers=6,
-            )
-        else:
-            self.tfilm = TFiLM(
-                num_blocks=num_tfilm_blocks, channels=channels, rnn_hidden=256
-            )
+        self.tfilm = TFiLM(
+            num_blocks=num_tfilm_blocks,
+            channels=channels,
+            rnn_hidden=hidden_size_rnn,
+            rnn_layers=num_layers_rnn,
+        )
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
@@ -166,6 +105,35 @@ class TFiLMMidcoder(nn.Module):
         x = self.tfilm(x, cond=cond_embed)
 
         return x
+
+
+class TransFiLMMidcoder(TFiLMMidcoder):
+    """
+    Midcoder that uses self-attention via a transformer across the time domain for 1D signals. Used to capture long-range time dependencies.
+    """
+
+    def __init__(
+        self,
+        channels: int,
+        num_residual_layers: int,
+        cond_dim: int,
+        num_tfilm_blocks: int,
+        number_transformer_heads: int,
+        num_transformer_layers: int,
+        dropout: float = 0.0,
+    ):
+        super().__init__(
+            channels,
+            num_residual_layers,
+            cond_dim,
+            num_tfilm_blocks,
+            hidden_size_rnn=channels
+            * 2,  # Use dummy value since we won't use the RNN in this midcoder
+            num_layers_rnn=1,
+        )
+        self.tfilm = TFiLMTransformer(
+            num_tfilm_blocks, channels, number_transformer_heads, num_transformer_layers
+        )
 
 
 class CBAMMidcoder(nn.Module):

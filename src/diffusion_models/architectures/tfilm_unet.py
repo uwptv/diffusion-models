@@ -3,9 +3,14 @@ from typing import List
 import torch.nn as nn
 
 from .blocks.base import InitialConvolution
-from .blocks.decoders import TFiLMDecoder, TFiLMMBConvDecoder
-from .blocks.encoders import TFiLMEncoder, TFiLMMBConvEncoder
-from .blocks.midcoders import CBAMMidcoder, TFiLMMBConvMidcoder, TFiLMMidcoder
+from .blocks.decoders import TFiLMDecoder, TFiLMMBConvDecoder, TransFiLMDecoder
+from .blocks.encoders import TFiLMEncoder, TFiLMMBConvEncoder, TransFiLMEncoder
+from .blocks.midcoders import (
+    CBAMMidcoder,
+    TFiLMMBConvMidcoder,
+    TFiLMMidcoder,
+    TransFiLMMidcoder,
+)
 from .unet import UNet
 
 
@@ -16,17 +21,25 @@ class TFiLMUNet(UNet):
 
     def __init__(
         self,
-        channels: List[int],
+        input_channels: int,
+        initial_channels: int,
+        levels: int,
         num_residual_layers: int,
-        num_tfilm_blocks: int,
         num_classes: int,
         cond_dim: int,
-        input_channels: int = 3,
+        num_tfilm_blocks: int,
+        hidden_size_rnn: int,
+        num_layers_rnn: int,
     ):
         super().__init__(cond_dim, num_classes)
         self.init_conv = InitialConvolution(
-            input_channels, channels[0], cond_dim, use_1d=True
+            input_channels, initial_channels, cond_dim, use_1d=True
         )
+
+        # Double channels every level
+        channels = [initial_channels]
+        for _ in range(levels):
+            channels.append(channels[-1] * 2)
 
         # Encoders and Decoders
         encoders = []
@@ -34,22 +47,39 @@ class TFiLMUNet(UNet):
         for curr_c, next_c in zip(channels[:-1], channels[1:]):
             encoders.append(
                 TFiLMEncoder(
-                    curr_c, next_c, num_residual_layers, num_tfilm_blocks, cond_dim
+                    curr_c,
+                    next_c,
+                    num_residual_layers,
+                    cond_dim,
+                    num_tfilm_blocks,
+                    hidden_size_rnn,
+                    num_layers_rnn,
                 )
             )
             decoders.append(
                 TFiLMDecoder(
-                    next_c, curr_c, num_residual_layers, num_tfilm_blocks, cond_dim
+                    next_c,
+                    curr_c,
+                    num_residual_layers,
+                    cond_dim,
+                    num_tfilm_blocks,
+                    hidden_size_rnn,
+                    num_layers_rnn,
                 )
             )
         self.encoders = nn.ModuleList(encoders)
         self.decoders = nn.ModuleList(reversed(decoders))
 
         self.midcoder = TFiLMMidcoder(
-            channels[-1], num_residual_layers, num_tfilm_blocks, cond_dim
+            channels[-1],
+            num_residual_layers,
+            cond_dim,
+            num_tfilm_blocks,
+            hidden_size_rnn,
+            num_layers_rnn,
         )
         self.final_conv = nn.Conv1d(
-            channels[0], input_channels, kernel_size=3, padding=1
+            initial_channels, input_channels, kernel_size=3, padding=1
         )
 
 
@@ -60,51 +90,62 @@ class TFiLMUNetTransformer(UNet):
 
     def __init__(
         self,
-        channels: List[int],
+        input_channels: int,
+        initial_channels: int,
+        levels: int,
         num_residual_layers: int,
-        num_tfilm_blocks: int,
         num_classes: int,
         cond_dim: int,
-        input_channels: int = 3,
+        num_tfilm_blocks: int,
+        num_transformer_heads: int,
+        num_transformer_layers: int,
     ):
         super().__init__(cond_dim, num_classes)
         self.init_conv = InitialConvolution(
-            input_channels, channels[0], cond_dim, use_1d=True
+            input_channels, initial_channels, cond_dim, use_1d=True
         )
+
+        # Double channels every level
+        channels = [initial_channels]
+        for _ in range(levels):
+            channels.append(channels[-1] * 2)
 
         # Encoders and Decoders
         encoders = []
         decoders = []
         for curr_c, next_c in zip(channels[:-1], channels[1:]):
             encoders.append(
-                TFiLMEncoder(
+                TransFiLMEncoder(
                     curr_c,
                     next_c,
                     num_residual_layers,
-                    num_tfilm_blocks,
                     cond_dim,
-                    use_transformer=True,
+                    num_tfilm_blocks,
+                    num_transformer_heads,
+                    num_transformer_layers,
                 )
             )
             decoders.append(
-                TFiLMDecoder(
+                TransFiLMDecoder(
                     next_c,
                     curr_c,
                     num_residual_layers,
-                    num_tfilm_blocks,
                     cond_dim,
-                    use_transformer=True,
+                    num_tfilm_blocks,
+                    num_transformer_heads,
+                    num_transformer_layers,
                 )
             )
         self.encoders = nn.ModuleList(encoders)
         self.decoders = nn.ModuleList(reversed(decoders))
 
-        self.midcoder = TFiLMMidcoder(
+        self.midcoder = TransFiLMMidcoder(
             channels[-1],
             num_residual_layers,
-            num_tfilm_blocks,
             cond_dim,
-            use_transformer=True,
+            num_tfilm_blocks,
+            num_transformer_heads,
+            num_transformer_layers,
         )
         self.final_conv = nn.Conv1d(
             channels[0], input_channels, kernel_size=3, padding=1

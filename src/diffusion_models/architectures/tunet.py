@@ -16,7 +16,7 @@ from diffusion_models.architectures.blocks.encoders import (
     TFiLMEncoder,
     TFiLMEncoderSeperable,
 )
-from diffusion_models.architectures.blocks.midcoders import MidcoderTransformer1D
+from diffusion_models.architectures.blocks.midcoders import TransFiLMMidcoder
 from diffusion_models.architectures.tfilm_unet import TFiLMUNet
 
 
@@ -37,7 +37,7 @@ class TUNet(TFiLMUNet):
         super().__init__(
             channels, num_residual_layers, num_t_blocks, num_classes, cond_dim
         )
-        self.midcoder = MidcoderTransformer1D(
+        self.midcoder = TransFiLMMidcoder(
             channels[-1],
             num_residual_layers,
             num_transformer_layers=num_transformer_layers,
@@ -219,7 +219,7 @@ class PaperTUNet(nn.Module):
             padding=2,
         )
 
-        self.midcoder = MidcoderTransformer1D(
+        self.midcoder = TransFiLMMidcoder(
             channels=256,
             num_residual_layers=2,
             num_transformer_layers=6,
@@ -350,7 +350,7 @@ class PaperTUNetAdapted(nn.Module):
             padding=0,
         )
 
-        self.midcoder = MidcoderTransformer1D(
+        self.midcoder = TransFiLMMidcoder(
             channels=256,
             num_residual_layers=2,
             num_transformer_layers=6,

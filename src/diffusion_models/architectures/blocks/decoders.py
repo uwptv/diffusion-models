@@ -94,13 +94,11 @@ class TFiLMDecoder(nn.Module):
         channels_in: int,
         channels_out: int,
         num_residual_layers: int,
-        num_tfilm_blocks: int,
         cond_dim: int,
+        num_tfilm_blocks: int,
+        hidden_size_rnn: int,
+        num_layers_rnn: int,
         activation: str = "silu",
-        conv_kernel_size: int = 3,
-        conv_stride: int = 1,
-        conv_padding: int = 1,
-        use_transformer: bool = False,
     ):
         super().__init__()
         self.activation = get_activation(activation)
@@ -109,9 +107,8 @@ class TFiLMDecoder(nn.Module):
             nn.Conv1d(
                 channels_in,
                 channels_out,
-                kernel_size=conv_kernel_size,
-                padding=conv_padding,
-                stride=conv_stride,
+                kernel_size=3,
+                padding=1,
             ),
         )
         self.res_blocks = nn.ModuleList(
@@ -120,17 +117,12 @@ class TFiLMDecoder(nn.Module):
                 for _ in range(num_residual_layers)
             ]
         )
-        if use_transformer:
-            self.tfilm = TFiLMTransformer(
-                num_blocks=num_tfilm_blocks,
-                channels=channels_out,
-                num_heads=8,
-                num_layers=6,
-            )
-        else:
-            self.tfilm = TFiLM(
-                num_blocks=num_tfilm_blocks, channels=channels_out, rnn_hidden=256
-            )
+        self.tfilm = TFiLM(
+            num_blocks=num_tfilm_blocks,
+            channels=channels_out,
+            rnn_hidden=hidden_size_rnn,
+            rnn_layers=num_layers_rnn,
+        )
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
@@ -154,6 +146,37 @@ class TFiLMDecoder(nn.Module):
             x = block(x, cond_embed)
 
         return x
+
+
+class TransFiLMDecoder(TFiLMDecoder):
+    def __init__(
+        self,
+        channels_in: int,
+        channels_out: int,
+        num_residual_layers: int,
+        cond_dim: int,
+        num_tfilm_blocks: int,
+        num_transformer_heads: int,
+        num_transformer_layers: int,
+        activation: str = "silu",
+    ):
+        super().__init__(
+            channels_in,
+            channels_out,
+            num_residual_layers,
+            cond_dim,
+            num_tfilm_blocks,
+            64,  # Use dummy values for RNN params since they won't be used in this variant
+            1,
+            activation,
+        )
+        # Replace TFiLM mechanism with Transformer Mechanism
+        self.tfilm = TFiLMTransformer(
+            channels=channels_out,
+            num_blocks=num_tfilm_blocks,
+            num_heads=num_transformer_heads,
+            num_layers=num_transformer_layers,
+        )
 
 
 class TFiLMDecoderTransposed(TFiLMDecoder):

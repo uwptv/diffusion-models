@@ -72,7 +72,12 @@ class TFiLM(nn.Module):
 
 class TFiLMTransformer(nn.Module):
     def __init__(
-        self, num_blocks: int, channels: int, num_heads: int = 8, num_layers: int = 6
+        self,
+        num_blocks: int,
+        channels: int,
+        num_heads: int,
+        num_layers: int,
+        dropout: float = 0.0,
     ):
         super().__init__()
         self.num_blocks = num_blocks
@@ -84,7 +89,7 @@ class TFiLMTransformer(nn.Module):
                     d_model=self.channels,
                     num_heads=num_heads,
                     dim_feedforward=4 * channels,
-                    dropout=0.1,
+                    dropout=dropout,
                 )
                 for _ in range(num_layers)
             ]
