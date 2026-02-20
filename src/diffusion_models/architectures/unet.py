@@ -82,7 +82,7 @@ class UNet(ConditionalVectorField, ABC):
         num_samples: int,
         p_data_shape: List[int],
         class_label: int | None = None,
-        num_timesteps: int = 100,
+        num_timesteps: int = 30,
         guidance_scale: float = 1.0,
         null_class: int = 0,
         device: torch.device = None,

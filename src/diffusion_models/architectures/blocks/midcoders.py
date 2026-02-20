@@ -133,6 +133,7 @@ class TransFiLMMidcoder(TFiLMMidcoder):
             num_layers_rnn=1,
         )
         self.tfilm = TFiLMTransformer(
+            cond_dim,
             num_tfilm_blocks,
             channels,
             number_transformer_heads,

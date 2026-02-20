@@ -73,6 +73,7 @@ class TFiLM(nn.Module):
 class TFiLMTransformer(nn.Module):
     def __init__(
         self,
+        cond_dim: int,
         num_blocks: int,
         channels: int,
         num_heads: int,
@@ -88,8 +89,10 @@ class TFiLMTransformer(nn.Module):
             [
                 _TFiLMTransformerLayer(
                     d_model=self.channels,
+                    num_blocks=self.num_blocks,
                     num_heads=num_heads,
                     dim_feedforward=ffn_dim_multiplier * channels,
+                    cond_dim=cond_dim,
                     dropout=dropout,
                 )
                 for _ in range(num_layers)
@@ -122,7 +125,7 @@ class TFiLMTransformer(nn.Module):
         # Use positional encoding
         pos = torch.arange(self.num_blocks, device=pooled.device)  # (num_blocks,)
         pos_emb = self.pos_encoding(pos).unsqueeze(0)  # (1, num_blocks, C)
-        pooled = pooled + pos_emb
+        pooled = pooled + pos_emb  # (B, num_blocks, C)
 
         # Transformer over blocks (sequence length = num_blocks)
         transformer_out = pooled
@@ -150,7 +153,13 @@ class TFiLMTransformer(nn.Module):
 
 class _TFiLMTransformerLayer(nn.Module):
     def __init__(
-        self, d_model: int, num_heads: int, dim_feedforward: int, dropout: float = 0.0
+        self,
+        d_model: int,
+        num_blocks: int,
+        num_heads: int,
+        dim_feedforward: int,
+        cond_dim: int,
+        dropout: float = 0.0,
     ) -> None:
         super().__init__()
         self.self_attn = nn.MultiheadAttention(
@@ -158,14 +167,26 @@ class _TFiLMTransformerLayer(nn.Module):
         )
         self.linear1 = nn.Linear(d_model, dim_feedforward)
         self.linear2 = nn.Linear(dim_feedforward, d_model)
-        self.norm1 = AdaGroupNorm(num_groups=8, num_channels=d_model, cond_dim=d_model)
-        self.norm2 = AdaGroupNorm(num_groups=8, num_channels=d_model, cond_dim=d_model)
+        self.norm1 = AdaGroupNorm(num_channels=num_blocks, cond_dim=cond_dim)
+        self.norm2 = AdaGroupNorm(num_channels=num_blocks, cond_dim=cond_dim)
         self.dropout = nn.Dropout(dropout)
         self.dropout1 = nn.Dropout(dropout)
         self.dropout2 = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
-        attn_out, _ = self.self_attn(x, x, x, need_weights=False)
+        """
+        Args:
+            x: (B, num_blocks, d_model = channels)
+            cond: (B, cond_dim)
+        Returns:
+            x: (B, num_blocks, d_model)
+        """
+        # Apply self-attention mechanism
+        attn_out, _ = self.self_attn(
+            x, x, x, need_weights=False
+        )  # (B, num_blocks, d_model)
+
+        # Pass through MLP
         x = self.norm1(x + self.dropout1(attn_out), cond)
         ff = self.linear2(self.dropout(torch.relu(self.linear1(x))))
         x = self.norm2(x + self.dropout2(ff), cond)

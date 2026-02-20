@@ -45,7 +45,7 @@ def objective(trial: optuna.Trial) -> float:
     lr = trial.suggest_float("learning_rate", 1e-6, 1e-2, log=True)
     batch_size = trial.suggest_categorical("batch_size", [32, 64, 128, 256])
     num_epochs = trial.suggest_int("num_epochs", 200, 1000)
-    num_tfilm_blocks = trial.suggest_categorical("num_tfilm_blocks", [2, 4, 8, 16])
+    num_tfilm_blocks = trial.suggest_categorical("num_tfilm_blocks", [8, 16])
     num_transformer_heads = trial.suggest_categorical(
         "num_transformer_heads", [1, 2, 4, 8]
     )
@@ -98,6 +98,8 @@ def objective(trial: optuna.Trial) -> float:
     with mlflow.start_run(run_name=f"trial_{trial.number}", nested=True):
         mlflow.log_params(
             {
+                "model_size_MiB": f"{model_size:.2f}",
+                "flops_giga": f"{giga_flops:.3f}",
                 "initial_channels": initial_channels,
                 "levels": levels,
                 "num_residual_layers": num_residual_layers,
@@ -106,8 +108,6 @@ def objective(trial: optuna.Trial) -> float:
                 "learning_rate": f"{lr:.3}",
                 "batch_size": batch_size,
                 "num_epochs": num_epochs,
-                "model_size_MiB": f"{model_size:.2f}",
-                "flops_giga": f"{giga_flops:.3f}",
                 "num_tfilm_blocks": num_tfilm_blocks,
                 "num_transformer_heads": num_transformer_heads,
                 "num_transformer_layers": num_transformer_layers,
