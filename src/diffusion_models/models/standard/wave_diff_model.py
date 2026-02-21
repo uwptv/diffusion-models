@@ -92,7 +92,6 @@ def objective(trial: optuna.Trial) -> float:
                 device=device,
                 lr=lr,
                 batch_size=128,
-                val_split=0.2,  # Use 20% of data for validation
             )
 
             mlflow.log_metric("val_loss", val_loss, run_id=run_id)
@@ -143,7 +142,6 @@ if __name__ == "__main__":
             path=path,
             model=model,
             eta=study.best_params["label_dropout_rate"],
-            trial=None,
             stopper=EarlyStopping(patience=15),
         )
         _, val_loss = trainer.train(
@@ -151,7 +149,6 @@ if __name__ == "__main__":
             device=device,
             lr=study.best_params["learning_rate"],
             batch_size=128,
-            val_split=0.2,
         )
         # Log the best model
         mlflow.pytorch.log_model(model, artifact_path="best_model", run_id=run_id)

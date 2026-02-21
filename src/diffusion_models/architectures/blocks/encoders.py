@@ -79,7 +79,9 @@ class Encoder1D(nn.Module):
 
         # Downsample: (bs, c_in, L) -> (bs, c_out, L // 2)
         x = self.downsample(x)
-        # x = self.norm(x, cond_embed) # Commented out normalization for better comparison with other models
+        x = self.norm(
+            x, cond_embed
+        )  # Commented out normalization for better comparison with other models
         x = self.activation(x)
 
         return x

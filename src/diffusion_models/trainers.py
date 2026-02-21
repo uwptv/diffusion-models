@@ -45,7 +45,11 @@ class Trainer(ABC):
         self.stopper = stopper
 
     @abstractmethod
-    def get_loss(self, **kwargs) -> torch.Tensor:
+    def get_training_loss(self, **kwargs) -> torch.Tensor:
+        pass
+
+    @abstractmethod
+    def get_validation_loss(self, **kwargs) -> torch.Tensor:
         pass
 
     def get_optimizer(self, lr: float):
@@ -56,6 +60,7 @@ class Trainer(ABC):
         num_epochs: int,
         device: torch.device,
         lr: float,
+        val_every: int = 10,
         **kwargs,
     ):
         # Start
@@ -68,31 +73,35 @@ class Trainer(ABC):
             opt.zero_grad()
 
             # Compute training and validation loss
-            train_loss, val_loss = self.get_loss(**kwargs)
-
-            # Check early stopping
-            if self.trial:
-                self.trial.report(val_loss.item(), step=idx)
-                if self.trial.should_prune():
-                    raise optuna.exceptions.TrialPruned()
-
-            # Check custom stopping criterion
-            self.stopper(val_loss.item())
-            if self.stopper.should_stop:
-                print(f"\nEarly stopping triggered at epoch {idx}")
-                mlflow.set_tag("termination_reason", "local_early_stopping")
-                mlflow.log_param("early_stopped_epoch", idx)
-                break
+            train_loss = self.get_training_loss(**kwargs)
 
             # Backprop on training loss and step optimizer
             train_loss.backward()
             opt.step()
 
+            # Compute validation loss periodically
+            if idx % val_every == 0:
+                val_loss = self.get_validation_loss(**kwargs)
+                loss_val = val_loss.item()
+
+                # Check early stopping
+                if self.trial:
+                    self.trial.report(loss_val, step=idx)
+                    if self.trial.should_prune():
+                        raise optuna.exceptions.TrialPruned()
+
+                self.stopper(loss_val)
+                if self.stopper.should_stop:
+                    print(f"\nEarly stopping triggered at epoch {idx}")
+                    mlflow.set_tag("termination_reason", "local_early_stopping")
+                    mlflow.log_param("early_stopped_epoch", idx)
+                    break
+
+                mlflow.log_metric("val_loss", loss_val, step=idx)
+
             # Log losses to mlflow
             loss_train = train_loss.item()
-            loss_val = val_loss.item()
             mlflow.log_metric("train_loss", loss_train, step=idx)
-            mlflow.log_metric("val_loss", loss_val, step=idx)
 
             # Update tqdm description
             pbar.set_description(
@@ -117,44 +126,29 @@ class CFGTrainer(Trainer):
         self.eta = eta
         self.path = path
 
-    def get_loss(
-        self, batch_size: int, val_split: float = 0.2
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        # Step 1: Sample z,y from p_data
-        z, y = self.path.sample_conditioning_variable(
-            batch_size
-        )  # z shape (batch_size, c, x_dim), y shape (batch_size, 1)
+    def _sample_batch(self, batch_size: int):
+        """Sample a batch of data for flow matching."""
+        z, y = self.path.sample_conditioning_variable(batch_size)
 
-        # Step 2: Set each label to the null class (index 0) with probability eta
         mask = torch.rand(batch_size) < self.eta
         y[mask] = 0
 
-        # Step 3: Sample t and x
-        t = torch.rand((batch_size,) + (1,) * (z.ndim - 1)).to(
-            z.device
-        )  # (batch_size, 1, x_dim)
-        x = self.path.sample_conditional_path(z, t)  # (batch_size, c, x_dim)
+        t = torch.rand((batch_size,) + (1,) * (z.ndim - 1)).to(z.device)
+        x = self.path.sample_conditional_path(z, t)
+        u_t = self.path.conditional_vector_field(x, z, t)
 
-        # Step 4: Split into training and validation sets
-        split_idx = int(batch_size * (1 - val_split))
-        x_train, x_val = x[:split_idx], x[split_idx:]
-        t_train, t_val = t[:split_idx], t[split_idx:]
-        y_train, y_val = y[:split_idx], y[split_idx:]
+        return x, t, y, u_t
 
-        # Step 5: Regress and output loss
-        u_t_theta = self.model(x_train, t_train, y_train)  # (batch_size, c, x_dim)
-        u_t = self.path.conditional_vector_field(
-            x_train, z[:split_idx], t_train
-        )  # (batch_size, c, x_dim)
-        train_loss = torch.mean((u_t - u_t_theta) ** 2)
+    def get_training_loss(self, batch_size: int) -> torch.Tensor:
+        x, t, y, u_t = self._sample_batch(batch_size)
+        u_t_theta = self.model(x, t, y)
+        return torch.mean((u_t - u_t_theta) ** 2)
 
-        u_t_theta = self.model(x_val, t_val, y_val)  # (batch_size, c, x_dim)
-        u_t = self.path.conditional_vector_field(
-            x_val, z[split_idx:], t_val
-        )  # (batch_size, c, x_dim)
-        val_loss = torch.mean((u_t - u_t_theta) ** 2)
-
-        return train_loss, val_loss
+    def get_validation_loss(self, batch_size: int) -> torch.Tensor:
+        x, t, y, u_t = self._sample_batch(batch_size)
+        with torch.no_grad():
+            u_t_theta = self.model(x, t, y)
+        return torch.mean((u_t - u_t_theta) ** 2)
 
 
 class TinyHARTrainer(Trainer):
