@@ -69,7 +69,7 @@ class CBAMMidcoder(nn.Module):
         )
         self.cbam_blocks = nn.ModuleList(
             [
-                CBAM(channels, cond_dim, cbam_reduction_ratio, cbam_kernel_size)
+                CBAM(channels, cbam_reduction_ratio, cbam_kernel_size)
                 for _ in range(num_residual_layers)
             ]
         )
@@ -83,7 +83,7 @@ class CBAMMidcoder(nn.Module):
         # Pass through residual blocks and CBAM blocks: (bs, c, L) -> (bs, c, L)
         for res_block, cbam_block in zip(self.res_blocks, self.cbam_blocks):
             x = res_block(x, cond)
-            x = cbam_block(x, cond)
+            x = cbam_block(x)
 
         return x
 

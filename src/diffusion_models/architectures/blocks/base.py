@@ -581,17 +581,15 @@ class FeatureFusion(nn.Module):
 
 
 class CBAM(nn.Module):
-    """
-    Convolutional Block Attention Module (CBAM) for 1D data.
-    """
-
     def __init__(self, channels: int, reduction_ratio: int, kernel_size: int):
         super().__init__()
+        hidden = max(
+            4, channels // reduction_ratio
+        )  # Ensure hidden layer has at least 4 units
         self.channel_attention = nn.Sequential(
-            nn.Linear(channels, channels // reduction_ratio),
+            nn.Linear(channels, hidden),
             nn.ReLU(),
-            nn.Linear(channels // reduction_ratio, channels),
-            nn.Sigmoid(),
+            nn.Linear(hidden, channels),
         )
         self.spatial_attention = nn.Sequential(
             nn.Conv1d(2, 1, kernel_size=kernel_size, padding=kernel_size // 2),
@@ -599,36 +597,29 @@ class CBAM(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-        - x: (B, C, L)
-        Returns:
-        - out: (B, C, L)
-        """
-        # Store residual
         residual = x
 
+        # 1. Channel Attention
         # Compute the max and average across the time dimension
-        avg_pool = torch.mean(x, dim=2, keepdim=True)  # (B, C, 1)
-        max_pool, _ = torch.max(x, dim=2, keepdim=True)  # (B, C, 1)
+        avg_p = torch.mean(x, dim=2)  # (B, C)
+        max_p, _ = torch.max(x, dim=2)  # (B, C)
 
-        # Run through MLP
-        avg_pool = self.channel_attention(avg_pool)  # (B, C, 1)
-        max_pool = self.channel_attention(max_pool)  # (B, C, 1)
+        # Sum then Sigmoid (Original Paper Logic)
+        cbam_c = self.channel_attention(avg_p) + self.channel_attention(max_p)
+        cbam_c = torch.sigmoid(cbam_c).unsqueeze(-1)  # (B, C, 1)
 
-        # Compute channel attention
-        x = torch.sigmoid(x * (avg_pool + max_pool))  # (B, C, L)
+        # Scale the input
+        x = x * cbam_c
 
-        # Spatial Attention
+        # 2. Spatial Attention
         avg_out = torch.mean(x, dim=1, keepdim=True)  # (B, 1, L)
         max_out, _ = torch.max(x, dim=1, keepdim=True)  # (B, 1, L)
         sa_input = torch.cat([avg_out, max_out], dim=1)  # (B, 2, L)
         sa = self.spatial_attention(sa_input)  # (B, 1, L)
-        out = x * sa  # (B, C, L)
 
-        out = out + residual  # (B, C, L)
-
-        return out
+        # Scale and add residual
+        out = x * sa
+        return out + residual
 
 
 class MBConv(nn.Module):
