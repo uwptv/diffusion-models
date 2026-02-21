@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 
 from diffusion_models.architectures.blocks.base import (
+    CBAM,
     AdaGroupNorm,
-    ConditionalCBAM,
     MBConv,
     ResidualLayer,
     ResidualLayer4D,
@@ -50,6 +50,40 @@ class Midcoder1D(nn.Module):
         # Pass through residual blocks: (bs, c, L) -> (bs, c, L)
         for block in self.res_blocks:
             x = block(x, cond_embed)
+
+        return x
+
+
+class CBAMMidcoder(nn.Module):
+    def __init__(
+        self,
+        channels: int,
+        num_residual_layers: int,
+        cond_dim: int,
+        cbam_reduction_ratio: int,
+        cbam_kernel_size: int,
+    ):
+        super().__init__()
+        self.res_blocks = nn.ModuleList(
+            [ResidualLayer(channels, cond_dim) for _ in range(num_residual_layers)]
+        )
+        self.cbam_blocks = nn.ModuleList(
+            [
+                CBAM(channels, cond_dim, cbam_reduction_ratio, cbam_kernel_size)
+                for _ in range(num_residual_layers)
+            ]
+        )
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c, L)
+        - cond: (bs, cond_dim)
+        """
+        # Pass through residual blocks and CBAM blocks: (bs, c, L) -> (bs, c, L)
+        for res_block, cbam_block in zip(self.res_blocks, self.cbam_blocks):
+            x = res_block(x, cond)
+            x = cbam_block(x, cond)
 
         return x
 
@@ -140,30 +174,6 @@ class TransFiLMMidcoder(TFiLMMidcoder):
             num_transformer_layers,
             ffn_dim_multiplier,
         )
-
-
-class CBAMMidcoder(nn.Module):
-    def __init__(self, channels: int, num_residual_layers: int, cond_dim: int):
-        super().__init__()
-        self.res_blocks = nn.ModuleList(
-            [ResidualLayer(channels, cond_dim) for _ in range(num_residual_layers)]
-        )
-        self.cbam_blocks = nn.ModuleList(
-            [ConditionalCBAM(channels, cond_dim) for _ in range(num_residual_layers)]
-        )
-
-    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-        - x: (bs, c, L)
-        - cond: (bs, cond_dim)
-        """
-        # Pass through residual blocks and CBAM blocks: (bs, c, L) -> (bs, c, L)
-        for res_block, cbam_block in zip(self.res_blocks, self.cbam_blocks):
-            x = res_block(x, cond)
-            x = cbam_block(x, cond)
-
-        return x
 
 
 class TFiLMMBConvMidcoder(TFiLMMidcoder):

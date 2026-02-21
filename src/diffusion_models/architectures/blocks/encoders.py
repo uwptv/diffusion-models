@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 
 from diffusion_models.architectures.blocks.base import (
+    CBAM,
     AdaGroupNorm,
     CrossChannelAttention,
     MBConv,
@@ -83,6 +84,32 @@ class Encoder1D(nn.Module):
             x, cond_embed
         )  # Commented out normalization for better comparison with other models
         x = self.activation(x)
+
+        return x
+
+
+class CBAMEncoder(Encoder1D):
+    def __init__(
+        self,
+        channels_in: int,
+        channels_out: int,
+        num_residual_layers: int,
+        cond_dim: int,
+        cbam_reduction_ratio: int,
+        cbam_kernel_size: int,
+        activation: str = "silu",
+    ):
+        super().__init__(
+            channels_in, channels_out, num_residual_layers, cond_dim, activation
+        )
+        self.cbam = CBAM(channels_out, cbam_reduction_ratio, cbam_kernel_size)
+
+    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+        # Pass through base encoder block
+        x = super().forward(x, cond_embed)
+
+        # Enhance with CBAM: (bs, c_out, L // 2) -> (bs, c_out, L // 2)
+        x = self.cbam(x)
 
         return x
 

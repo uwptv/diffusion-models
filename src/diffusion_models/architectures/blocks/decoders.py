@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 
 from diffusion_models.architectures.blocks.base import (
+    CBAM,
     AdaGroupNorm,
     CrossChannelAttention,
     DepthwiseConv1DExplicit,
@@ -86,6 +87,32 @@ class Decoder1D(nn.Module):
         # Pass through residual blocks: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
         for block in self.res_blocks:
             x = block(x, cond_embed)
+
+        return x
+
+
+class CBAMDecoder(Decoder1D):
+    def __init__(
+        self,
+        channels_in: int,
+        channels_out: int,
+        num_residual_layers: int,
+        cond_dim: int,
+        cbam_reduction_ratio: int,
+        cbam_kernel_size: int,
+        activation: str = "silu",
+    ):
+        super().__init__(
+            channels_in, channels_out, num_residual_layers, cond_dim, activation
+        )
+        self.cbam = CBAM(channels_out, cbam_reduction_ratio, cbam_kernel_size)
+
+    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+        # Pass through base encoder block
+        x = super().forward(x, cond_embed)
+
+        # Enhance with CBAM: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
+        x = self.cbam(x)
 
         return x
 
