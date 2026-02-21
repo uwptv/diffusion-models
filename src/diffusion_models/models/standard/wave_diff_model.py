@@ -1,13 +1,14 @@
 import mlflow
 import optuna
 import torch
+from optuna.pruners import MedianPruner
 
 from diffusion_models.architectures.standard_unet import StandardUNet
 from diffusion_models.data.synthetic import WaveSampler
 from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath
 from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
 from diffusion_models.metrics.evaluate_metrics import compute_all_metrics
-from diffusion_models.trainers import CFGTrainer
+from diffusion_models.trainers import CFGTrainer, EarlyStopping
 from diffusion_models.utils.sizes import GigaFLOP, MiB, count_flops, model_size_b
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -39,7 +40,8 @@ def objective(trial: optuna.Trial) -> float:
         num_classes=3,
         cond_dim=cond_dim,
     )
-    trainer = CFGTrainer(path=path, model=net, eta=eta)
+    stopper = EarlyStopping(patience=15)
+    trainer = CFGTrainer(path=path, model=net, eta=eta, trial=trial, stopper=stopper)
 
     # Skip models that are too large to train
     model_size = model_size_b(net) / MiB
@@ -84,24 +86,37 @@ def objective(trial: optuna.Trial) -> float:
         )
 
         # Train and get validation loss
-        run_id, val_loss = trainer.train(
-            num_epochs=1000,
-            device=device,
-            lr=lr,
-            batch_size=128,
-            val_split=0.2,  # Use 20% of data for validation
-        )
+        try:
+            run_id, val_loss = trainer.train(
+                num_epochs=1000,
+                device=device,
+                lr=lr,
+                batch_size=128,
+                val_split=0.2,  # Use 20% of data for validation
+            )
 
-        mlflow.log_metric("val_loss", val_loss, run_id=run_id)
+            mlflow.log_metric("val_loss", val_loss, run_id=run_id)
 
-        # Optimize for validation loss (lower is better)
-        return val_loss
+            # Optimize for validation loss (lower is better)
+            return val_loss
+        except optuna.TrialPruned:
+            mlflow.set_tag("status", "pruned_during_training")
+            mlflow.end_run(status="KILLED")
+            raise optuna.TrialPruned(
+                "Trial pruned during training due to early stopping"
+            )
+        except Exception as e:
+            mlflow.log_param("exception", str(e))
+            mlflow.end_run(status="FAILED")
+            raise e
 
 
 if __name__ == "__main__":
     mlflow.set_experiment("standard_unet")
 
-    study = optuna.create_study(direction="minimize")
+    study = optuna.create_study(
+        direction="minimize", pruner=MedianPruner(n_startup_trials=10, n_warmup_steps=5)
+    )
     study.optimize(objective, n_trials=50)
 
     print("Best trial:", study.best_trial.number)
@@ -128,6 +143,8 @@ if __name__ == "__main__":
             path=path,
             model=model,
             eta=study.best_params["label_dropout_rate"],
+            trial=None,
+            stopper=EarlyStopping(patience=15),
         )
         _, val_loss = trainer.train(
             num_epochs=1000,

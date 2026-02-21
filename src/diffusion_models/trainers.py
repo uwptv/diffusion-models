@@ -5,6 +5,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import mlflow
 import mlflow.pytorch
+import optuna
 import torch
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 from torch import nn
@@ -14,10 +15,34 @@ from .dynamics.base import ConditionalVectorField
 from .dynamics.prob_paths import GaussianConditionalProbabilityPath
 
 
+class EarlyStopping:
+    def __init__(self, patience=10):
+        self.patience = patience
+        self.counter = 0
+        self.best_loss = float("inf")
+        self.should_stop = False
+
+    def __call__(self, val_loss):
+        if val_loss < self.best_loss:
+            self.best_loss = val_loss
+            self.counter = 0
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.should_stop = True
+
+
 class Trainer(ABC):
-    def __init__(self, model: nn.Module):
+    def __init__(
+        self,
+        model: nn.Module,
+        stopper: EarlyStopping,
+        trial: optuna.Trial | None = None,
+    ):
         super().__init__()
         self.model = model
+        self.trial = trial
+        self.stopper = stopper
 
     @abstractmethod
     def get_loss(self, **kwargs) -> torch.Tensor:
@@ -45,6 +70,20 @@ class Trainer(ABC):
             # Compute training and validation loss
             train_loss, val_loss = self.get_loss(**kwargs)
 
+            # Check early stopping
+            if self.trial:
+                self.trial.report(val_loss.item(), step=idx)
+                if self.trial.should_prune():
+                    raise optuna.exceptions.TrialPruned()
+
+            # Check custom stopping criterion
+            self.stopper(val_loss.item())
+            if self.stopper.should_stop:
+                print(f"\nEarly stopping triggered at epoch {idx}")
+                mlflow.set_tag("termination_reason", "local_early_stopping")
+                mlflow.log_param("early_stopped_epoch", idx)
+                break
+
             # Backprop on training loss and step optimizer
             train_loss.backward()
             opt.step()
@@ -62,7 +101,7 @@ class Trainer(ABC):
 
         self.model.eval()
 
-        return mlflow.active_run().info.run_id, loss_val
+        return mlflow.active_run().info.run_id, self.stopper.best_loss
 
 
 class CFGTrainer(Trainer):
