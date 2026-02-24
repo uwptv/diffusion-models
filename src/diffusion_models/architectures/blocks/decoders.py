@@ -15,39 +15,6 @@ from diffusion_models.architectures.blocks.base import (
 from diffusion_models.architectures.blocks.tfilm import TFiLM, TFiLMTransformer
 
 
-class Decoder(nn.Module):
-    def __init__(
-        self,
-        channels_in: int,
-        channels_out: int,
-        num_residual_layers: int,
-        cond_dim: int,
-    ):
-        super().__init__()
-        self.upsample = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="bilinear"),
-            nn.Conv2d(channels_in, channels_out, kernel_size=3, padding=1),
-        )
-        self.res_blocks = nn.ModuleList(
-            [ResidualLayer(channels_out, cond_dim) for _ in range(num_residual_layers)]
-        )
-
-    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-        - x: (bs, c, h, w)
-        - cond: (bs, cond_dim)
-        """
-        # Upsample: (bs, c_in, h, w) -> (bs, c_out, 2 * h, 2 * w)
-        x = self.upsample(x)
-
-        # Pass through residual blocks: (bs, c_out, h, w) -> (bs, c_out, 2 * h, 2 * w)
-        for block in self.res_blocks:
-            x = block(x, cond)
-
-        return x
-
-
 class Decoder1D(nn.Module):
     def __init__(
         self,
@@ -113,6 +80,60 @@ class CBAMDecoder(Decoder1D):
 
         # Enhance with CBAM: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
         x = self.cbam(x)
+
+        return x
+
+
+class MBConvDecoder(Decoder1D):
+    def __init__(
+        self,
+        channels_in: int,
+        channels_out: int,
+        num_residual_layers: int,
+        cond_dim: int,
+        num_mbconv_layers: int,
+        expansion_factor: int,
+        kernel_size: int,
+        activation: str = "silu",
+    ):
+        super().__init__(
+            channels_in, channels_out, num_residual_layers, cond_dim, activation
+        )
+        self.upsample_layer = nn.Upsample(
+            scale_factor=2, mode="linear", align_corners=False
+        )
+        self.mbconv = MBConv(
+            channels_in=channels_in,
+            channels_out=channels_out,
+            cond_dim=cond_dim,
+            expansion_factor=expansion_factor,
+            kernel_size=kernel_size,
+            stride=1,
+        )
+        self.mbconv_stack = nn.ModuleList(
+            MBConv(
+                channels_in=channels_out,
+                channels_out=channels_out,
+                cond_dim=cond_dim,
+                expansion_factor=expansion_factor,
+                kernel_size=kernel_size,
+                stride=1,
+            )
+            for _ in range(num_mbconv_layers - 1)
+        )
+
+    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+        # Upsample
+        x = self.upsample_layer(x)
+
+        # Pass through MBConv layers
+        x = self.mbconv(x, cond=cond_embed)
+        for mbconv in self.mbconv_stack:
+            x = mbconv(x, cond=cond_embed)
+
+        # Pass through residual blocks
+        for block in self.res_blocks:
+            x = block(x, cond_embed)
 
         return x
 

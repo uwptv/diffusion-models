@@ -11,26 +11,6 @@ from diffusion_models.architectures.blocks.base import (
 from diffusion_models.architectures.blocks.tfilm import TFiLM, TFiLMTransformer
 
 
-class Midcoder(nn.Module):
-    def __init__(self, channels: int, num_residual_layers: int, cond_dim: int):
-        super().__init__()
-        self.res_blocks = nn.ModuleList(
-            [ResidualLayer(channels, cond_dim) for _ in range(num_residual_layers)]
-        )
-
-    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-        - x: (bs, c, h, w)
-        - cond: (bs, cond_dim)
-        """
-        # Pass through residual blocks: (bs, c, h, w) -> (bs, c, h, w)
-        for block in self.res_blocks:
-            x = block(x, cond)
-
-        return x
-
-
 class Midcoder1D(nn.Module):
     def __init__(self, channels: int, num_residual_layers: int, cond_dim: int):
         super().__init__()
@@ -84,6 +64,41 @@ class CBAMMidcoder(nn.Module):
         for res_block, cbam_block in zip(self.res_blocks, self.cbam_blocks):
             x = res_block(x, cond)
             x = cbam_block(x)
+
+        return x
+
+
+class MBConvMidcoder(Midcoder1D):
+    def __init__(
+        self,
+        channels: int,
+        num_residual_layers: int,
+        cond_dim: int,
+        num_mbconv_layers: int,
+        expansion_factor: int,
+        kernel_size: int,
+    ):
+        super().__init__(channels, num_residual_layers, cond_dim)
+        self.mbconv_blocks = nn.ModuleList(
+            [
+                MBConv(channels, channels, cond_dim, expansion_factor, kernel_size, 1)
+                for _ in range(num_mbconv_layers)
+            ]
+        )
+
+    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c, L)
+        - cond_embed: (bs, cond_dim)
+        """
+        # Pass through residual blocks
+        for block in self.res_blocks:
+            x = block(x, cond_embed)
+
+        # Pass through MBConv blocks
+        for mbconv in self.mbconv_blocks:
+            x = mbconv(x, cond_embed)
 
         return x
 

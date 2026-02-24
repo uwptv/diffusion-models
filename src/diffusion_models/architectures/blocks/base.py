@@ -624,7 +624,7 @@ class CBAM(nn.Module):
 
 class MBConv(nn.Module):
     """
-    (Mobile) Inverted Bottleneck Convolutional Block for 1D data.
+    Mobile (Inverted) Bottleneck Convolutional Block for 1D data.
     """
 
     def __init__(
@@ -632,9 +632,9 @@ class MBConv(nn.Module):
         channels_in: int,
         channels_out: int,
         cond_dim: int,
-        expansion_factor: int = 4,
-        kernel_size: int = 3,
-        stride: int = 1,
+        expansion_factor: int,
+        kernel_size: int,
+        stride: int,
     ):
         super().__init__()
         hidden_dim = channels_in * expansion_factor
@@ -650,18 +650,13 @@ class MBConv(nn.Module):
             groups=hidden_dim,
         )
         self.project_conv = nn.Conv1d(hidden_dim, channels_out, kernel_size=1)
-        self.norm_expand = AdaGroupNorm(
-            num_groups=8, num_channels=hidden_dim, cond_dim=cond_dim
-        )
-        self.norm_depthwise = AdaGroupNorm(
-            num_groups=8, num_channels=hidden_dim, cond_dim=cond_dim
-        )
+        self.norm_expand = AdaGroupNorm(num_channels=hidden_dim, cond_dim=cond_dim)
+        self.norm_depthwise = AdaGroupNorm(num_channels=hidden_dim, cond_dim=cond_dim)
         self.norm_project = AdaGroupNorm(
-            num_groups=min(8, channels_out),
             num_channels=channels_out,
             cond_dim=cond_dim,
         )
-        self.activation = nn.SiLU()
+        self.activation = nn.ReLU6()
         self.use_residual = (channels_in == channels_out) and (stride == 1)
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:

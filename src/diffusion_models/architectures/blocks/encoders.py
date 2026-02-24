@@ -114,6 +114,60 @@ class CBAMEncoder(Encoder1D):
         return x
 
 
+class MBConvEncoder(Encoder1D):
+    def __init__(
+        self,
+        channels_in: int,
+        channels_out: int,
+        num_residual_layers: int,
+        cond_dim: int,
+        num_mbconv_layers: int,
+        expansion_factor: int,
+        kernel_size: int,
+        activation: str = "silu",
+    ):
+        super().__init__(
+            channels_in, channels_out, num_residual_layers, cond_dim, activation
+        )
+        self.downsample = MBConv(
+            channels_in=channels_in,
+            channels_out=channels_out,
+            cond_dim=cond_dim,
+            expansion_factor=expansion_factor,
+            kernel_size=kernel_size,
+            stride=2,
+        )
+        self.mbconvstack = nn.ModuleList(
+            [
+                MBConv(
+                    channels_in=channels_out,
+                    channels_out=channels_out,
+                    cond_dim=cond_dim,
+                    expansion_factor=expansion_factor,
+                    kernel_size=kernel_size,
+                    stride=1,
+                )
+                for _ in range(num_mbconv_layers - 1)
+            ]
+        )
+
+    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+        # Pass through residual blocks: (bs, c_in, L) -> (bs, c_in, L)
+        for block in self.res_blocks:
+            x = block(x, cond_embed)
+
+        # Downsample using MBConv: (bs, c_in, L) -> (bs, c_out, L // 2)
+        x = self.downsample(x, cond_embed)
+
+        # Pass through additional MBConv layers: (bs, c_out, L // 2) -> (bs, c_out, L // 2)
+        for mbconv in self.mbconvstack:
+            x = mbconv(x, cond_embed)
+
+        # No activation here, as MBConv intentionally uses linear output
+
+        return x
+
+
 class TFiLMEncoder(nn.Module):
     def __init__(
         self,
