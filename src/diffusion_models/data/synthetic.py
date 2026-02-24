@@ -98,7 +98,15 @@ class WaveSampler(nn.Module, Sampleable):
         self.num_classes = len(amplitudes) + 1  # +1 for null class at index 0
         self.dummy = nn.Buffer(torch.zeros(1))
         self._seed = seed
-        self._gen = None
+        self._gen = torch.Generator(device=self.dummy.device)
+        if self._seed is not None:
+            self._gen.manual_seed(self._seed)
+
+    def reset_generator(self) -> None:
+        """Reset the generator to its initial state for reproducibility."""
+        self._gen = torch.Generator(device=self.dummy.device)
+        if self._seed is not None:
+            self._gen.manual_seed(self._seed)
 
     def sample(
         self,
@@ -123,9 +131,10 @@ class WaveSampler(nn.Module, Sampleable):
             0, self.duration, self.sample_rate * self.duration, device=self.dummy.device
         )
 
-        if self._gen is not None and self._gen.device != self.dummy.device:
+        if self._gen.device != self.dummy.device:
             self._gen = torch.Generator(device=self.dummy.device)
-            self._gen.manual_seed(self._seed)
+            if self._seed is not None:
+                self._gen.manual_seed(self._seed)
 
         # If class_idx specified, use it for all samples; otherwise sample randomly
         if class_idx is not None:

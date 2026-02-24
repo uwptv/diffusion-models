@@ -36,61 +36,6 @@ def get_activation(activation: str) -> nn.Module:
     return activations[activation_lower]
 
 
-class FourierEncoder(nn.Module):
-    """
-    Based on https://github.com/lucidrains/denoising-diffusion-pytorch/blob/main/denoising_diffusion_pytorch/karras_unet.py#L183
-    """
-
-    def __init__(self, dim: int):
-        super().__init__()
-        assert dim % 2 == 0
-        self.half_dim = dim // 2
-        self.weights = nn.Parameter(torch.randn(1, self.half_dim))
-
-    def forward(self, t: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-        - t: (bs, 1, 1, 1)
-        Returns:
-        - embeddings: (bs, dim)
-        """
-        t = t.view(-1, 1)  # (bs, 1)
-        freqs = t * self.weights * 2 * math.pi  # (bs, half_dim)
-        sin_embed = torch.sin(freqs)  # (bs, half_dim)
-        cos_embed = torch.cos(freqs)  # (bs, half_dim)
-        return torch.cat([sin_embed, cos_embed], dim=-1) * math.sqrt(2)  # (bs, dim)
-
-
-class SinusoidalTimeEmbedding(nn.Module):
-    def __init__(self, dim: int):
-        super().__init__()
-
-        assert dim % 2 == 0
-        self.half_dim = dim // 2
-
-    def forward(self, t: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-        - t: (B,) or (B, 1)
-        Returns:
-        - emb: (B, dim)
-        """
-        t = t.view(-1, 1)  # (B, 1)
-
-        # Compute frequencies: [1, 10000^(2i/d)]
-        freqs = torch.exp(
-            -math.log(10000)
-            * torch.arange(0, self.half_dim, dtype=torch.float32)
-            / self.half_dim
-        ).to(t.device)  # (half_dim,)
-
-        angles = t * freqs * 2 * math.pi  # (B, half_dim)
-
-        emb = torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)  # (B, dim)
-
-        return emb
-
-
 class SinusoidalEmbedding(nn.Module):
     def __init__(self, dim: int):
         super().__init__()

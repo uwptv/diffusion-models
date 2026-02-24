@@ -295,68 +295,6 @@ class TFiLMEncoderSeperable(TFiLMEncoder):
         )
 
 
-class TFiLMMBConvEncoder(TFiLMEncoder):
-    """
-    TFiLM Encoder using MBConv for downsampling.
-    """
-
-    def __init__(
-        self,
-        channels_in: int,
-        channels_out: int,
-        num_residual_layers: int,
-        num_tfilm_blocks: int,
-        cond_dim: int,
-        activation: str = "silu",
-        conv_kernel_size: int = 3,
-        conv_stride: int = 1,
-        conv_padding: int = 1,
-        use_transformer: bool = False,
-    ):
-        super().__init__(
-            channels_in,
-            channels_out,
-            num_residual_layers,
-            num_tfilm_blocks,
-            cond_dim,
-            activation,
-            conv_kernel_size,
-            conv_stride,
-            conv_padding,
-            use_transformer,
-        )
-        # Replace downsample with MBConv
-        self.downsample = MBConv(
-            channels_in=channels_in,
-            channels_out=channels_out,
-            cond_dim=cond_dim,
-            expansion_factor=4,
-            kernel_size=conv_kernel_size,
-            stride=2,
-        )
-
-    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-        - x: (bs, c_in, L)
-        - cond_embed: (bs, cond_dim)
-        Returns:
-        - x: (bs, c_out, L // 2)
-        """
-        # Pass through residual blocks: (bs, c_in, L) -> (bs, c_in, L)
-        for block in self.res_blocks:
-            x = block(x, cond=cond_embed)
-
-        # Downsample using MBConv: (bs, c_in, L) -> (bs, c_out, L // 2)
-        x = self.downsample(x, cond=cond_embed)
-
-        # No activation here, as MBConv intentionally uses linear output
-        # Apply TFiLM: (bs, c_out, L // 2) -> (bs, c_out, L // 2)
-        x = self.tfilm(x)
-
-        return x
-
-
 class HAEncoder(nn.Module):
     """
     Hybrid Attention Encoder for 1D data.

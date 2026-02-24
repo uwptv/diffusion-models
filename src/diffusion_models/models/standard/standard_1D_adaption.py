@@ -23,6 +23,9 @@ path = GaussianConditionalProbabilityPath(
 
 
 def objective(trial: optuna.Trial) -> float:
+    # Reset the generator to ensure identical data sampling across trials for fair comparison
+    path.p_data.reset_generator()
+
     # Hyperparameter search space
     initial_channels = trial.suggest_categorical("initial_channels", [4, 8, 16])
     levels = trial.suggest_int("levels", 1, 2)
