@@ -71,7 +71,6 @@ class Trainer(ABC):
         num_epochs: int,
         device: torch.device,
         lr: float,
-        val_every: int = 10,
         **kwargs,
     ):
         # Start
