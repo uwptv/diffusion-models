@@ -23,9 +23,6 @@ path = GaussianConditionalProbabilityPath(
 
 
 def objective(trial: optuna.Trial) -> float:
-    # Reset the generator to ensure identical data sampling across trials for fair comparison
-    path.p_data.reset_generator()
-
     # Hyperparameter search space for model architecture
     initial_channels = trial.suggest_categorical("initial_channels", [4, 8, 16])
     levels = trial.suggest_int("levels", 1, 2)
@@ -95,6 +92,9 @@ def objective(trial: optuna.Trial) -> float:
             }
         )
 
+        # Reset the generator to ensure identical data sampling across trials for fair comparison
+        path.p_data.reset_generator()
+
         # Train and get validation loss
         try:
             run_id, val_loss = trainer.train(
@@ -121,6 +121,9 @@ def objective(trial: optuna.Trial) -> float:
 
 
 if __name__ == "__main__":
+    # Set seeds for reproducibility
+    torch.manual_seed(42)
+
     mlflow.set_experiment("standard_unet")
 
     study = optuna.create_study(
@@ -132,9 +135,9 @@ if __name__ == "__main__":
     print("Best value:", study.best_value)
     print("Best params:", study.best_params)
 
-    path.p_data.reset_generator()  # Reset generator before retraining best model
-
     mlflow.set_experiment("best_models_retrained")
+
+    path.p_data.reset_generator()  # Reset generator before retraining best model
 
     with mlflow.start_run(run_name="standard_unet") as run:
         run_id = run.info.run_id
@@ -155,7 +158,7 @@ if __name__ == "__main__":
             path=path,
             model=model,
             eta=study.best_params["label_dropout_rate"],
-            stopper=EarlyStopping(patience=15),
+            stopper=EarlyStopping(patience=2),
         )
         _, val_loss = trainer.train(
             num_epochs=1000,
@@ -164,7 +167,7 @@ if __name__ == "__main__":
             batch_size=128,
         )
         # Log the best model
-        mlflow.pytorch.log_model(model, artifact_path="best_model", run_id=run_id)
+        mlflow.pytorch.log_model(model, name="best_standard_unet", run_id=run_id)
 
         # Log final validation loss
         mlflow.log_metric("final_val_loss", val_loss, run_id=run_id)

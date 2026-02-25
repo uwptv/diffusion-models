@@ -65,7 +65,9 @@ def compute_all_metrics(
             metrics[f"kid_std_gs{guidance_scale}_class_{class_idx + 1}"] = kid_std
 
             # Precision & Recall
-            pr_dict = compute_pr(real_features=real_features, gen_features=gen_features)
+            pr_dict = compute_pr(
+                real_features=real_features, fake_features=gen_features, nearest_k=3
+            )
             per_class_metrics[class_idx]["precision"] = pr_dict["precision"]
             per_class_metrics[class_idx]["recall"] = pr_dict["recall"]
             metrics[f"precision_gs{guidance_scale}_class_{class_idx + 1}"] = pr_dict[
@@ -76,7 +78,9 @@ def compute_all_metrics(
             ]
 
             # Density & Coverage
-            dc_dict = compute_dc(real_features=real_features, gen_features=gen_features)
+            dc_dict = compute_dc(
+                real_features=real_features, fake_features=gen_features, nearest_k=5
+            )
             per_class_metrics[class_idx]["density"] = dc_dict["density"]
             per_class_metrics[class_idx]["coverage"] = dc_dict["coverage"]
             metrics[f"density_gs{guidance_scale}_class_{class_idx + 1}"] = dc_dict[
