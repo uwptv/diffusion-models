@@ -1,81 +1,98 @@
 import torch
 
 
-def _kth_neighbor_distance(
-    features: torch.Tensor, k: int, batch_size: int
-) -> torch.Tensor:
+def compute_pairwise_distance(data_x: torch.Tensor, data_y: torch.Tensor | None = None):
     """
-    Compute the distance to the k-th nearest neighbor for each feature vector.
     Args:
-    - features: tensor of shape (N, D) containing feature vectors
-    - k: neighborhood size for kNN
-    - batch_size: Batch size for chunked distance computation
+        data_x: torch.Tensor([N, feature_dim], dtype=torch.float32)
+        data_y: torch.Tensor([M, feature_dim], dtype=torch.float32)
     Returns:
-    - kth: tensor of shape (N,) containing distance to k-th nearest neighbor
+        torch.Tensor([N, M], dtype=torch.float32) of pairwise distances.
     """
-    n = features.shape[0]
-    if k < 1 or k >= n:
-        raise ValueError(f"k must be in [1, n-1], got k={k}, n={n}")
+    if data_y is None:
+        data_y = data_x
 
-    kth = torch.empty(n, device=features.device)
+    # Compute pairwise Euclidean distances
+    # ||x - y||^2 = ||x||^2 + ||y||^2 - 2*x*y^T
+    x_norm = (data_x**2).sum(dim=1, keepdim=True)  # [N, 1]
+    y_norm = (data_y**2).sum(dim=1, keepdim=True)  # [M, 1]
 
-    for i in range(0, n, batch_size):
-        chunk = features[i : i + batch_size]  # (batch_size, feature_dim)
-        dist = torch.cdist(chunk, features)  # (batch_size, n)
+    dists = x_norm + y_norm.T - 2.0 * torch.mm(data_x, data_y.T)
 
-        # Exclude self-distance for the same-set kNN query
-        idx = torch.arange(i, i + chunk.shape[0], device=features.device)
-        dist[torch.arange(chunk.shape[0], device=features.device), idx] = float("inf")
+    # Clamp to avoid numerical errors with sqrt of negative numbers
+    dists = torch.clamp(dists, min=0.0)
+    dists = torch.sqrt(dists)
 
-        kth[i : i + chunk.shape[0]] = torch.topk(dist, k, largest=False).values[
-            :, -1
-        ]  # (batch_size,)
-
-    return kth
+    return dists
 
 
-def _coverage(
-    queries: torch.Tensor,
-    refs: torch.Tensor,
-    ref_radii: torch.Tensor,
-    batch_size: int,
-) -> float:
-    n = queries.shape[0]
-    covered = 0
-
-    for i in range(0, n, batch_size):
-        q_chunk = queries[i : i + batch_size]
-        dist = torch.cdist(q_chunk, refs)
-
-        # A query is covered if it lies within any reference radius
-        is_covered = (dist <= ref_radii.unsqueeze(0)).any(dim=1)
-        covered += is_covered.sum().item()
-
-    return covered / n
-
-
-def compute_improved_pr(
-    real_features: torch.Tensor,
-    gen_features: torch.Tensor,
-    k: int = 3,
-    batch_size: int = 1000,
-) -> dict[str, float]:
+def get_kth_value(unsorted: torch.Tensor, k: int, dim=-1):
     """
-    Improved precision/recall for generative models (Kynkaanniemi et al., 2019).
+    Args:
+        unsorted: torch.Tensor of any dimensionality.
+        k: int
+    Returns:
+        kth values along the designated dimension.
+    """
+    # Get the k smallest values along the specified dimension
+    # kthvalue returns (values, indices), we only need values
+    k_smallests, _ = torch.topk(unsorted, k, dim=dim, largest=False, sorted=False)
+
+    # Get the maximum of these k smallest values (which is the k-th smallest)
+    kth_values = k_smallests.max(dim=dim)[0]
+
+    return kth_values
+
+
+def compute_nearest_neighbour_distances(input_features: torch.Tensor, nearest_k: int):
+    """
+    Args:
+        input_features: torch.Tensor([N, feature_dim], dtype=torch.float32)
+        nearest_k: int
+    Returns:
+        torch.Tensor([N], dtype=torch.float32) of distances to kth nearest neighbours.
+    """
+    distances = compute_pairwise_distance(input_features)
+    radii = get_kth_value(distances, k=nearest_k + 1, dim=-1)
+    return radii
+
+
+def compute_pr(real_features, fake_features, nearest_k=3):
+    """
+    Computes (improved) precision and recall given two manifolds.
 
     Args:
-        real_features: Real feature vectors (N, D)
-        gen_features: Generated feature vectors (M, D)
-        k: kNN neighborhood size
-        batch_size: Batch size for chunked distance computation
-
+        real_features: torch.Tensor([N, feature_dim], dtype=torch.float32)
+        fake_features: torch.Tensor([M, feature_dim], dtype=torch.float32)
+        nearest_k: int.
     Returns:
-        precision, recall as floats in [0, 1]
+        dict of precision, recall
     """
-    real_radii = _kth_neighbor_distance(real_features, k, batch_size)
-    gen_radii = _kth_neighbor_distance(gen_features, k, batch_size)
 
-    precision = _coverage(gen_features, real_features, real_radii, batch_size)
-    recall = _coverage(real_features, gen_features, gen_radii, batch_size)
+    real_nearest_neighbour_distances = compute_nearest_neighbour_distances(
+        real_features, nearest_k
+    )  # (N,)
+    fake_nearest_neighbour_distances = compute_nearest_neighbour_distances(
+        fake_features, nearest_k
+    )  # shape (M,)
+    distance_real_fake = compute_pairwise_distance(
+        real_features, fake_features
+    )  # shape (N, M)
 
-    return precision, recall
+    precision = (
+        (distance_real_fake < real_nearest_neighbour_distances.unsqueeze(1))
+        .any(dim=0)
+        .float()
+        .mean()
+        .item()
+    )
+
+    recall = (
+        (distance_real_fake < fake_nearest_neighbour_distances.unsqueeze(0))
+        .any(dim=1)
+        .float()
+        .mean()
+        .item()
+    )
+
+    return dict(precision=precision, recall=recall)

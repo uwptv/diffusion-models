@@ -1,72 +1,94 @@
 import torch
 
 
-def compute_density_coverage(
-    real_features: torch.Tensor,
-    gen_features: torch.Tensor,
-    k: int = 5,
-    batch_size: int = 1000,
-) -> tuple[float, float]:
+def compute_pairwise_distance(data_x: torch.Tensor, data_y: torch.Tensor | None = None):
     """
-    Compute Density and Coverage metrics.
+    Args:
+        data_x: torch.Tensor([N, feature_dim], dtype=torch.float32)
+        data_y: torch.Tensor([M, feature_dim], dtype=torch.float32)
+    Returns:
+        torch.Tensor([N, M], dtype=torch.float32) of pairwise distances.
+    """
+    if data_y is None:
+        data_y = data_x
 
-    For each generated sample, find its k nearest real neighbors.
-    - Density: average number of real k-NN spheres that contain each generated sample (normalized by k)
-    - Coverage: fraction of real samples that have a generated neighbor within their k-NN radius
+    # Compute pairwise Euclidean distances
+    # ||x - y||^2 = ||x||^2 + ||y||^2 - 2*x*y^T
+    x_norm = (data_x**2).sum(dim=1, keepdim=True)  # [N, 1]
+    y_norm = (data_y**2).sum(dim=1, keepdim=True)  # [M, 1]
+
+    dists = x_norm + y_norm.T - 2.0 * torch.mm(data_x, data_y.T)
+
+    # Clamp to avoid numerical errors with sqrt of negative numbers
+    dists = torch.clamp(dists, min=0.0)
+    dists = torch.sqrt(dists)
+
+    return dists
+
+
+def get_kth_value(unsorted: torch.Tensor, k: int, dim=-1):
+    """
+    Args:
+        unsorted: torch.Tensor of any dimensionality.
+        k: int
+    Returns:
+        kth values along the designated dimension.
+    """
+    # Get the k smallest values along the specified dimension
+    # kthvalue returns (values, indices), we only need values
+    k_smallests, _ = torch.topk(unsorted, k, dim=dim, largest=False, sorted=False)
+
+    # Get the maximum of these k smallest values (which is the k-th smallest)
+    kth_values = k_smallests.max(dim=dim)[0]
+
+    return kth_values
+
+
+def compute_nearest_neighbour_distances(input_features: torch.Tensor, nearest_k: int):
+    """
+    Args:
+        input_features: torch.Tensor([N, feature_dim], dtype=torch.float32)
+        nearest_k: int
+    Returns:
+        torch.Tensor([N], dtype=torch.float32) of distances to kth nearest neighbours.
+    """
+    distances = compute_pairwise_distance(input_features)
+    radii = get_kth_value(distances, k=nearest_k + 1, dim=-1)
+    return radii
+
+
+def compute_dc(real_features, fake_features, nearest_k):
+    """
+    Computes density and coverage given two manifolds.
 
     Args:
-        real_features: Real feature vectors (N, D)
-        gen_features: Generated feature vectors (M, D)
-        k: kNN neighborhood size
-        batch_size: Batch size for chunked distance computation
-
+        real_features: torch.Tensor([N, feature_dim], dtype=torch.float32)
+        fake_features: torch.Tensor([M, feature_dim], dtype=torch.float32)
+        nearest_k: int.
     Returns:
-        (density, coverage) where density is in [0, inf) and coverage is in [0, 1]
+        dict of density and coverage.
     """
-    n_real = real_features.shape[0]
-    n_gen = gen_features.shape[0]
 
-    if k >= n_real:
-        raise ValueError(f"k={k} must be < n_real={n_real}")
+    real_nearest_neighbour_distances = compute_nearest_neighbour_distances(
+        real_features, nearest_k
+    )  # (N,)
+    distance_real_fake = compute_pairwise_distance(
+        real_features, fake_features
+    )  # shape (N, M)
 
-    # For density & coverage: compute k-NN radii of real samples
-    real_radii = []
-    for i in range(0, n_real, batch_size):
-        real_chunk = real_features[i : i + batch_size]
-        dist = torch.cdist(real_chunk, real_features)
+    density = (1.0 / float(nearest_k)) * (
+        (distance_real_fake < real_nearest_neighbour_distances.unsqueeze(1))
+        .sum(dim=0)
+        .float()
+        .mean()
+        .item()
+    )
 
-        # Exclude self-distance
-        idx = torch.arange(i, i + real_chunk.shape[0], device=real_features.device)
-        dist[torch.arange(real_chunk.shape[0], device=real_features.device), idx] = (
-            float("inf")
-        )
+    coverage = (
+        (distance_real_fake.min(dim=1)[0] < real_nearest_neighbour_distances)
+        .float()
+        .mean()
+        .item()
+    )
 
-        knn_dists = torch.topk(dist, k, largest=False).values[:, -1]
-        real_radii.append(knn_dists)
-
-    real_radii = torch.cat(real_radii, dim=0)
-
-    # Density: average count of real k-NN spheres that contain each generated sample, normalized by k
-    gen_density_counts = []
-    for i in range(0, n_gen, batch_size):
-        gen_chunk = gen_features[i : i + batch_size]
-        dist = torch.cdist(gen_chunk, real_features)  # (B, N_real)
-        counts = (dist <= real_radii.unsqueeze(0)).sum(dim=1)  # (B,)
-        gen_density_counts.append(counts)
-
-    gen_density_counts = torch.cat(gen_density_counts, dim=0)
-    density = (gen_density_counts.float().mean() / k).item()
-
-    # Coverage: fraction of real samples with a generated neighbor
-    covered = 0
-    for i in range(0, n_real, batch_size):
-        real_chunk = real_features[i : i + batch_size]
-        dist = torch.cdist(real_chunk, gen_features)
-        is_covered = (dist <= real_radii[i : i + real_chunk.shape[0]].unsqueeze(1)).any(
-            dim=1
-        )
-        covered += is_covered.sum().item()
-
-    coverage = covered / n_real
-
-    return density, coverage
+    return dict(density=density, coverage=coverage)

@@ -1,9 +1,9 @@
 import torch
 
-from .density_coverage import compute_density_coverage
+from .density_coverage import compute_dc
 from .feature_encoding import extract_features
 from .fid import compute_fid
-from .improved_pr import compute_improved_pr
+from .improved_pr import compute_pr
 from .kid import compute_kid
 
 
@@ -65,22 +65,26 @@ def compute_all_metrics(
             metrics[f"kid_std_gs{guidance_scale}_class_{class_idx + 1}"] = kid_std
 
             # Precision & Recall
-            precision, recall = compute_improved_pr(
-                real_features=real_features, gen_features=gen_features
-            )
-            per_class_metrics[class_idx]["precision"] = precision
-            per_class_metrics[class_idx]["recall"] = recall
-            metrics[f"precision_gs{guidance_scale}_class_{class_idx + 1}"] = precision
-            metrics[f"recall_gs{guidance_scale}_class_{class_idx + 1}"] = recall
+            pr_dict = compute_pr(real_features=real_features, gen_features=gen_features)
+            per_class_metrics[class_idx]["precision"] = pr_dict["precision"]
+            per_class_metrics[class_idx]["recall"] = pr_dict["recall"]
+            metrics[f"precision_gs{guidance_scale}_class_{class_idx + 1}"] = pr_dict[
+                "precision"
+            ]
+            metrics[f"recall_gs{guidance_scale}_class_{class_idx + 1}"] = pr_dict[
+                "recall"
+            ]
 
             # Density & Coverage
-            density, coverage = compute_density_coverage(
-                real_features=real_features, gen_features=gen_features
-            )
-            per_class_metrics[class_idx]["density"] = density
-            per_class_metrics[class_idx]["coverage"] = coverage
-            metrics[f"density_gs{guidance_scale}_class_{class_idx + 1}"] = density
-            metrics[f"coverage_gs{guidance_scale}_class_{class_idx + 1}"] = coverage
+            dc_dict = compute_dc(real_features=real_features, gen_features=gen_features)
+            per_class_metrics[class_idx]["density"] = dc_dict["density"]
+            per_class_metrics[class_idx]["coverage"] = dc_dict["coverage"]
+            metrics[f"density_gs{guidance_scale}_class_{class_idx + 1}"] = dc_dict[
+                "density"
+            ]
+            metrics[f"coverage_gs{guidance_scale}_class_{class_idx + 1}"] = dc_dict[
+                "coverage"
+            ]
 
         # Compute averages across classes for this guidance scale
         metric_names = [

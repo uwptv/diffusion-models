@@ -91,6 +91,7 @@ def objective(trial: optuna.Trial) -> float:
                 "cond_dim": cond_dim,
                 "label_dropout_rate": f"{eta:.2f}",
                 "learning_rate": f"{lr:.3}",
+                "upsampling_method": upsampling_method,
             }
         )
 
@@ -125,11 +126,13 @@ if __name__ == "__main__":
     study = optuna.create_study(
         direction="minimize", pruner=MedianPruner(n_startup_trials=10, n_warmup_steps=5)
     )
-    study.optimize(objective, n_trials=50)
+    study.optimize(objective, n_trials=100)
 
     print("Best trial:", study.best_trial.number)
     print("Best value:", study.best_value)
     print("Best params:", study.best_params)
+
+    path.p_data.reset_generator()  # Reset generator before retraining best model
 
     mlflow.set_experiment("best_models_retrained")
 
@@ -143,6 +146,7 @@ if __name__ == "__main__":
             input_channels=3,
             initial_channels=study.best_params["initial_channels"],
             levels=study.best_params["levels"],
+            upsampling_method=study.best_params["upsampling_method"],
             num_residual_layers=study.best_params["num_residual_layers"],
             num_classes=3,
             cond_dim=study.best_params["cond_dim"],
