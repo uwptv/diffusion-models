@@ -46,7 +46,7 @@ def objective(trial: optuna.Trial) -> float:
         num_classes=3,
         cond_dim=cond_dim,
     )
-    stopper = EarlyStopping(patience=2)
+    stopper = EarlyStopping(patience=50)
     trainer = CFGTrainer(path=path, model=net, eta=eta, trial=trial, stopper=stopper)
 
     # Skip models that are too large to train
@@ -127,7 +127,13 @@ if __name__ == "__main__":
     mlflow.set_experiment("standard_unet")
 
     study = optuna.create_study(
-        direction="minimize", pruner=MedianPruner(n_startup_trials=10, n_warmup_steps=5)
+        direction="minimize",
+        pruner=MedianPruner(
+            n_startup_trials=20,
+            n_warmup_steps=50,
+            interval_steps=10,
+            n_min_trials=5,
+        ),
     )
     study.optimize(objective, n_trials=100)
 
@@ -158,7 +164,7 @@ if __name__ == "__main__":
             path=path,
             model=model,
             eta=study.best_params["label_dropout_rate"],
-            stopper=EarlyStopping(patience=2),
+            stopper=EarlyStopping(patience=50),
         )
         _, val_loss = trainer.train(
             num_epochs=1000,

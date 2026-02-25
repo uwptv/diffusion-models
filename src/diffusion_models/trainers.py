@@ -1,5 +1,6 @@
 import tempfile
 from abc import ABC, abstractmethod
+from collections import deque
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -30,6 +31,16 @@ class EarlyStopping:
             self.counter += 1
             if self.counter >= self.patience:
                 self.should_stop = True
+
+
+class SmoothLogger:
+    def __init__(self, window_size=5):
+        self.history = deque(maxlen=window_size)
+
+    def update(self, new_val):
+        self.history.append(new_val)
+        # Returns the moving average
+        return sum(self.history) / len(self.history)
 
 
 class Trainer(ABC):
@@ -68,6 +79,9 @@ class Trainer(ABC):
         opt = self.get_optimizer(lr)
         self.model.train()
 
+        # Initialize smooth logger for validation loss
+        smooth_logger = SmoothLogger(window_size=5)
+
         pbar = tqdm(enumerate(range(num_epochs)))
         for idx, _ in pbar:
             opt.zero_grad()
@@ -79,25 +93,26 @@ class Trainer(ABC):
             train_loss.backward()
             opt.step()
 
-            # Compute validation loss periodically
-            if idx % val_every == 0:
-                val_loss = self.get_validation_loss(**kwargs)
-                loss_val = val_loss.item()
+            val_loss = self.get_validation_loss(**kwargs)
+            loss_val = val_loss.item()
 
-                # Check early stopping
-                if self.trial:
-                    self.trial.report(loss_val, step=idx)
-                    if self.trial.should_prune():
-                        raise optuna.exceptions.TrialPruned()
+            # Smooth validation loss for better early stopping decisions
+            smoothed_val_loss = smooth_logger.update(loss_val)
 
-                self.stopper(loss_val)
-                if self.stopper.should_stop:
-                    print(f"\nEarly stopping triggered at epoch {idx}")
-                    mlflow.set_tag("termination_reason", "local_early_stopping")
-                    mlflow.log_param("early_stopped_epoch", idx)
-                    break
+            # Check early stopping
+            if self.trial:
+                self.trial.report(smoothed_val_loss, step=idx)
+                if self.trial.should_prune():
+                    raise optuna.exceptions.TrialPruned()
 
-                mlflow.log_metric("val_loss", loss_val, step=idx)
+            self.stopper(loss_val)
+            if self.stopper.should_stop:
+                print(f"\nEarly stopping triggered at epoch {idx}")
+                mlflow.set_tag("termination_reason", "local_early_stopping")
+                mlflow.log_param("early_stopped_epoch", idx)
+                break
+
+            mlflow.log_metric("val_loss", loss_val, step=idx)
 
             # Log losses to mlflow
             loss_train = train_loss.item()
