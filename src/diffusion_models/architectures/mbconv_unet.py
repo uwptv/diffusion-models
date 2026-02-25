@@ -13,6 +13,7 @@ class MBConvUNet(UNet):
         input_channels: int,
         initial_channels: int,
         levels: int,
+        upsampling_method: str,
         num_residual_layers: int,
         num_classes: int,
         cond_dim: int,
@@ -50,6 +51,7 @@ class MBConvUNet(UNet):
                 MBConvDecoder(
                     next_c,
                     curr_c,
+                    upsampling_method,
                     num_residual_layers,
                     cond_dim,
                     num_mbconv_layers,

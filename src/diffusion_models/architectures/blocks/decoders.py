@@ -46,9 +46,7 @@ class Decoder1D(nn.Module):
         """
         # Upsample: (bs, c_in, L) -> (bs, c_out, 2*L)
         x = self.upsample(x)
-        x = self.norm(
-            x, cond_embed
-        )  # Commented out normalization for better comparison with other models
+        x = self.norm(x, cond_embed)
         x = self.activation(x)
 
         # Pass through residual blocks: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
@@ -63,6 +61,7 @@ class CBAMDecoder(Decoder1D):
         self,
         channels_in: int,
         channels_out: int,
+        method: str,
         num_residual_layers: int,
         cond_dim: int,
         cbam_reduction_ratio: int,
@@ -70,7 +69,7 @@ class CBAMDecoder(Decoder1D):
         activation: str = "silu",
     ):
         super().__init__(
-            channels_in, channels_out, num_residual_layers, cond_dim, activation
+            channels_in, channels_out, method, num_residual_layers, cond_dim, activation
         )
         self.cbam = CBAM(channels_out, cbam_reduction_ratio, cbam_kernel_size)
 
@@ -89,6 +88,7 @@ class MBConvDecoder(Decoder1D):
         self,
         channels_in: int,
         channels_out: int,
+        upsampling_method: str,
         num_residual_layers: int,
         cond_dim: int,
         num_mbconv_layers: int,
@@ -97,18 +97,12 @@ class MBConvDecoder(Decoder1D):
         activation: str = "silu",
     ):
         super().__init__(
-            channels_in, channels_out, num_residual_layers, cond_dim, activation
-        )
-        self.upsample_layer = nn.Upsample(
-            scale_factor=2, mode="linear", align_corners=False
-        )
-        self.mbconv = MBConv(
-            channels_in=channels_in,
-            channels_out=channels_out,
-            cond_dim=cond_dim,
-            expansion_factor=expansion_factor,
-            kernel_size=kernel_size,
-            stride=1,
+            channels_in,
+            channels_out,
+            upsampling_method,
+            num_residual_layers,
+            cond_dim,
+            activation,
         )
         self.mbconv_stack = nn.ModuleList(
             MBConv(
@@ -119,15 +113,16 @@ class MBConvDecoder(Decoder1D):
                 kernel_size=kernel_size,
                 stride=1,
             )
-            for _ in range(num_mbconv_layers - 1)
+            for _ in range(num_mbconv_layers)
         )
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
-        # Upsample
-        x = self.upsample_layer(x)
+        # Upsample, Normalize, Activate
+        x = self.upsample(x)
+        x = self.norm(x, cond_embed)
+        x = self.activation(x)
 
         # Pass through MBConv layers
-        x = self.mbconv(x, cond=cond_embed)
         for mbconv in self.mbconv_stack:
             x = mbconv(x, cond=cond_embed)
 
@@ -143,6 +138,7 @@ class TFiLMDecoder(nn.Module):
         self,
         channels_in: int,
         channels_out: int,
+        method: str,
         num_residual_layers: int,
         cond_dim: int,
         num_tfilm_blocks: int,
@@ -151,16 +147,11 @@ class TFiLMDecoder(nn.Module):
         activation: str = "silu",
     ):
         super().__init__()
+        upsampling_method = get_upsampling(method)
+        self.upsample = upsampling_method(channels_in, channels_out)
+        self.norm = AdaGroupNorm(num_channels=channels_out, cond_dim=cond_dim)
         self.activation = get_activation(activation)
-        self.upsample = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="linear", align_corners=False),
-            nn.Conv1d(
-                channels_in,
-                channels_out,
-                kernel_size=3,
-                padding=1,
-            ),
-        )
+
         self.res_blocks = nn.ModuleList(
             [
                 ResidualLayer(channels_out, cond_dim=cond_dim, use_1d=True)
@@ -184,8 +175,7 @@ class TFiLMDecoder(nn.Module):
         """
         # Upsample: (bs, c_in, L) -> (bs, c_out, 2*L)
         x = self.upsample(x)
-
-        # Apply activation: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
+        x = self.norm(x, cond_embed)
         x = self.activation(x)
 
         # Apply TFiLM: (bs, c_out, 2*L) -> (bs, c_out, 2*L)

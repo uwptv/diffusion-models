@@ -12,6 +12,7 @@ class CBAMUNet(UNet):
         self,
         input_channels: int,
         initial_channels: int,
+        upsampling_method: str,
         levels: int,
         num_residual_layers: int,
         num_classes: int,
@@ -48,6 +49,7 @@ class CBAMUNet(UNet):
                 CBAMDecoder(
                     next_c,
                     curr_c,
+                    upsampling_method,
                     num_residual_layers,
                     cond_dim,
                     cbam_reduction_ratio,

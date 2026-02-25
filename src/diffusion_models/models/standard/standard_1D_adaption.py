@@ -46,7 +46,7 @@ def objective(trial: optuna.Trial) -> float:
         num_classes=3,
         cond_dim=cond_dim,
     )
-    stopper = EarlyStopping(patience=15)
+    stopper = EarlyStopping(patience=2)
     trainer = CFGTrainer(path=path, model=net, eta=eta, trial=trial, stopper=stopper)
 
     # Skip models that are too large to train

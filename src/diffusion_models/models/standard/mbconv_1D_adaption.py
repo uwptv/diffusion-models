@@ -28,7 +28,10 @@ def objective(trial: optuna.Trial) -> float:
     initial_channels = trial.suggest_categorical("initial_channels", [4, 8, 16])
     levels = trial.suggest_int("levels", 1, 2)
     num_residual_layers = trial.suggest_int("num_residual_layers", 1, 2)
-    cond_dim = trial.suggest_categorical("cond_dim", [48, 64])
+    cond_dim = trial.suggest_categorical("cond_dim", [48, 64])  #
+    upsampling_method = trial.suggest_categorical(
+        "upsampling_method", ["transposed", "interpolation", "pixel_shuffle"]
+    )
     num_mbconv_layers = trial.suggest_int("num_mbconv_layers", 1, 3)
     expansion_factor = trial.suggest_int("expansion_factor", 3, 6)
     kernel_size = trial.suggest_categorical("kernel_size", [3, 5, 7])
@@ -42,6 +45,7 @@ def objective(trial: optuna.Trial) -> float:
         input_channels=3,
         initial_channels=initial_channels,
         levels=levels,
+        upsampling_method=upsampling_method,
         num_residual_layers=num_residual_layers,
         num_classes=3,
         cond_dim=cond_dim,
@@ -49,7 +53,7 @@ def objective(trial: optuna.Trial) -> float:
         expansion_factor=expansion_factor,
         kernel_size=kernel_size,
     )
-    stopper = EarlyStopping(patience=15)
+    stopper = EarlyStopping(patience=2)
     trainer = CFGTrainer(path=path, model=net, eta=eta, trial=trial, stopper=stopper)
 
     # Skip models that are too large to train
@@ -87,6 +91,7 @@ def objective(trial: optuna.Trial) -> float:
                 "flops_giga": f"{giga_flops:.5f}",
                 "initial_channels": initial_channels,
                 "levels": levels,
+                "upsampling_method": upsampling_method,
                 "num_residual_layers": num_residual_layers,
                 "cond_dim": cond_dim,
                 "label_dropout_rate": f"{eta:.2f}",
@@ -96,6 +101,9 @@ def objective(trial: optuna.Trial) -> float:
                 "kernel_size": kernel_size,
             }
         )
+
+        # Reset the generator to ensure identical data sampling across trials for fair comparison
+        path.p_data.reset_generator()
 
         # Train and get validation loss
         try:
@@ -123,18 +131,24 @@ def objective(trial: optuna.Trial) -> float:
 
 
 if __name__ == "__main__":
+    # Set seeds for reproducibility
+    torch.manual_seed(42)
+
     mlflow.set_experiment("mbconv_unet")
 
     study = optuna.create_study(
         direction="minimize", pruner=MedianPruner(n_startup_trials=10, n_warmup_steps=5)
     )
-    study.optimize(objective, n_trials=50)
+    study.optimize(objective, n_trials=100)
 
     print("Best trial:", study.best_trial.number)
     print("Best value:", study.best_value)
     print("Best params:", study.best_params)
 
     mlflow.set_experiment("best_models_retrained")
+
+    # Reset generator before retraining best model
+    path.p_data.reset_generator()
 
     with mlflow.start_run(run_name="mbconv_unet") as run:
         run_id = run.info.run_id
@@ -146,6 +160,7 @@ if __name__ == "__main__":
             input_channels=3,
             initial_channels=study.best_params["initial_channels"],
             levels=study.best_params["levels"],
+            upsampling_method=study.best_params["upsampling_method"],
             num_residual_layers=study.best_params["num_residual_layers"],
             num_classes=3,
             cond_dim=study.best_params["cond_dim"],
@@ -157,7 +172,7 @@ if __name__ == "__main__":
             path=path,
             model=model,
             eta=study.best_params["label_dropout_rate"],
-            stopper=EarlyStopping(patience=15),
+            stopper=EarlyStopping(patience=2),
         )
         _, val_loss = trainer.train(
             num_epochs=1000,
@@ -166,7 +181,7 @@ if __name__ == "__main__":
             batch_size=128,
         )
         # Log the best model
-        mlflow.pytorch.log_model(model, artifact_path="best_model", run_id=run_id)
+        mlflow.pytorch.log_model(model, name="best_mbconv_unet", run_id=run_id)
 
         # Log final validation loss
         mlflow.log_metric("final_val_loss", val_loss, run_id=run_id)
