@@ -26,11 +26,16 @@ def objective(trial: optuna.Trial) -> float:
     # Reset the generator to ensure identical data sampling across trials for fair comparison
     path.p_data.reset_generator()
 
-    # Hyperparameter search space
+    # Hyperparameter search space for model architecture
     initial_channels = trial.suggest_categorical("initial_channels", [4, 8, 16])
     levels = trial.suggest_int("levels", 1, 2)
     num_residual_layers = trial.suggest_int("num_residual_layers", 1, 2)
     cond_dim = trial.suggest_categorical("cond_dim", [48, 64])
+    upsampling_method = trial.suggest_categorical(
+        "upsampling_method", ["transposed", "interpolation", "pixel_shuffle"]
+    )
+
+    # Hyperparameters for training
     eta = trial.suggest_categorical("label_dropout_rate", [0.1, 0.2])
     lr = trial.suggest_categorical("learning_rate", [1e-4, 5e-4, 1e-3])
 
@@ -39,6 +44,7 @@ def objective(trial: optuna.Trial) -> float:
         input_channels=3,
         initial_channels=initial_channels,
         levels=levels,
+        upsampling_method=upsampling_method,
         num_residual_layers=num_residual_layers,
         num_classes=3,
         cond_dim=cond_dim,

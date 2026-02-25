@@ -36,6 +36,31 @@ def get_activation(activation: str) -> nn.Module:
     return activations[activation_lower]
 
 
+def get_upsampling(method: str) -> nn.Module:
+    """
+    Returns an upsampling module based on a string name.
+
+    Args:
+        method: Name of the upsampling method
+
+    Returns:
+        nn.Module: The upsampling module
+    """
+    methods = {
+        "transposed": TransposedConv,
+        "interpolation": InterpolationConv,
+        "pixel_shuffle": PixelShuffle,
+    }
+
+    method_lower = method.lower()
+    if method_lower not in methods:
+        raise ValueError(
+            f"Unknown upsampling method: {method}. Available: {list(methods.keys())}"
+        )
+
+    return methods[method_lower]
+
+
 class SinusoidalEmbedding(nn.Module):
     def __init__(self, dim: int):
         super().__init__()
@@ -631,3 +656,77 @@ class MBConv(nn.Module):
             )  # (B, channels_out, L_out), L_out is L in that case and channels_out == channels_in
 
         return x
+
+
+# -- Upsampling Modules -- #
+
+
+class TransposedConv(nn.Module):
+    def __init__(
+        self,
+        channels_in: int,
+        channels_out: int,
+    ):
+        super().__init__()
+        self.transposed_conv = nn.ConvTranspose1d(
+            channels_in,
+            channels_out,
+            kernel_size=4,
+            stride=2,
+            padding=1,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (B, channels_in, L)
+        Returns:
+        - out: (B, channels_out, L_out = 2 * L)
+        """
+        out = self.transposed_conv(x)  # (B, channels_out, L_out)
+        return out
+
+
+class InterpolationConv(nn.Module):
+    def __init__(
+        self,
+        channels_in: int,
+        channels_out: int,
+    ):
+        super().__init__()
+        self.conv = nn.Conv1d(channels_in, channels_out, kernel_size=3, padding=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (B, channels_in, L)
+        Returns:
+        - out: (B, channels_out, L_out = 2 * L)
+        """
+        x_upsampled = nn.functional.interpolate(
+            x, scale_factor=2, mode="linear", align_corners=False
+        )  # (B, channels_in, L_out)
+        out = self.conv(x_upsampled)  # (B, channels_out, L_out)
+        return out
+
+
+class PixelShuffle(nn.Module):
+    def __init__(self, channels_in: int, channels_out: int):
+        super().__init__()
+        self.channels_out = channels_out
+        self.conv = nn.Conv1d(channels_in, channels_out * 2, kernel_size=3, padding=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (B, channels_in, L)
+        Returns:
+        - out: (B, channels_out, L_out = 2 * L)
+        """
+        batch_size, _, seq_len = x.size()
+        x = self.conv(x)  # (B, channels_out * 2, L)
+        x = x.view(batch_size, self.channels_out, 2, seq_len)  # (B, channels_out, 2, L)
+        x = x.permute(0, 1, 3, 2).contiguous()  # (B, channels_out, L, 2)
+        out = x.view(batch_size, self.channels_out, seq_len * 2)
+
+        return out

@@ -11,6 +11,7 @@ from diffusion_models.architectures.blocks.base import (
     ResidualLayer4D,
     SeperableConv1D,
     get_activation,
+    get_upsampling,
 )
 from diffusion_models.architectures.blocks.tfilm import TFiLM, TFiLMTransformer
 
@@ -20,15 +21,14 @@ class Decoder1D(nn.Module):
         self,
         channels_in: int,
         channels_out: int,
+        method: str,
         num_residual_layers: int,
         cond_dim: int,
         activation: str = "silu",
     ):
         super().__init__()
-        self.upsample = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="linear", align_corners=False),
-            nn.Conv1d(channels_in, channels_out, kernel_size=3, padding=1),
-        )
+        upsample_method = get_upsampling(method)
+        self.upsample = upsample_method(channels_in, channels_out)
         self.res_blocks = nn.ModuleList(
             [
                 ResidualLayer(channels_out, cond_dim, use_1d=True)

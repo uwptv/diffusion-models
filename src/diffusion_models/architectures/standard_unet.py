@@ -24,6 +24,7 @@ class StandardUNet(UNet):
         input_channels: int,
         initial_channels: int,
         levels: int,
+        upsampling_method: str,
         num_residual_layers: int,
         num_classes: int,
         cond_dim: int,
@@ -44,7 +45,15 @@ class StandardUNet(UNet):
         decoders = []
         for curr_c, next_c in zip(channels[:-1], channels[1:]):
             encoders.append(Encoder1D(curr_c, next_c, num_residual_layers, cond_dim))
-            decoders.append(Decoder1D(next_c, curr_c, num_residual_layers, cond_dim))
+            decoders.append(
+                Decoder1D(
+                    next_c,
+                    curr_c,
+                    upsampling_method,
+                    num_residual_layers,
+                    cond_dim,
+                )
+            )
         self.encoders = nn.ModuleList(encoders)
         self.decoders = nn.ModuleList(reversed(decoders))
 
