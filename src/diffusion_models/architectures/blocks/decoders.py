@@ -193,6 +193,7 @@ class TransFiLMDecoder(TFiLMDecoder):
         self,
         channels_in: int,
         channels_out: int,
+        method: str,
         num_residual_layers: int,
         cond_dim: int,
         num_tfilm_blocks: int,
@@ -204,6 +205,7 @@ class TransFiLMDecoder(TFiLMDecoder):
         super().__init__(
             channels_in,
             channels_out,
+            method,
             num_residual_layers,
             cond_dim,
             num_tfilm_blocks,

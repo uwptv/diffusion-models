@@ -1,13 +1,14 @@
 import mlflow
 import optuna
 import torch
+from optuna.pruners import MedianPruner
 
 from diffusion_models.architectures.tfilm_unet import TFiLMUNetTransformer
 from diffusion_models.data.synthetic import WaveSampler
 from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath
 from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
 from diffusion_models.metrics.evaluate_metrics import compute_all_metrics
-from diffusion_models.trainers import CFGTrainer
+from diffusion_models.trainers import CFGTrainer, EarlyStopping
 from diffusion_models.utils.sizes import GigaFLOP, MiB, count_flops, model_size_b
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -39,10 +40,11 @@ def objective(trial: optuna.Trial) -> float:
     # Hyperparameter search space
     initial_channels = trial.suggest_categorical("initial_channels", [4, 8, 16])
     levels = trial.suggest_int("levels", 1, 2)
+    upsampling_method = trial.suggest_categorical(
+        "upsampling_method", ["transposed", "interpolation", "pixel_shuffle"]
+    )
     num_residual_layers = trial.suggest_int("num_residual_layers", 1, 2)
     cond_dim = trial.suggest_categorical("cond_dim", [48, 64])
-    eta = trial.suggest_categorical("label_dropout_rate", [0.1, 0.2])
-    lr = trial.suggest_categorical("learning_rate", [1e-4, 5e-4, 1e-3])
     num_tfilm_blocks = trial.suggest_categorical(
         "num_tfilm_blocks", [8, 16]
     )  # adapt constraint to more possible values
@@ -52,11 +54,16 @@ def objective(trial: optuna.Trial) -> float:
     num_transformer_layers = trial.suggest_int("num_transformer_layers", 1, 1)
     ffn_dim_multiplier = trial.suggest_categorical("ffn_dim_multiplier", [2])
 
+    # Hyperparameters for training
+    eta = trial.suggest_categorical("label_dropout_rate", [0.1, 0.2])
+    lr = trial.suggest_categorical("learning_rate", [1e-4, 5e-4, 1e-3])
+
     # Model & trainer
     net = TFiLMUNetTransformer(
         input_channels=3,
         initial_channels=initial_channels,
         levels=levels,
+        upsampling_method=upsampling_method,
         num_residual_layers=num_residual_layers,
         num_classes=3,
         cond_dim=cond_dim,
@@ -65,7 +72,9 @@ def objective(trial: optuna.Trial) -> float:
         num_transformer_layers=num_transformer_layers,
         ffn_dim_multiplier=ffn_dim_multiplier,
     )
-    trainer = CFGTrainer(path=path, model=net, eta=eta, null_label=0)
+    trainer = CFGTrainer(
+        path=path, model=net, eta=eta, trial=trial, stopper=EarlyStopping(patience=50)
+    )
 
     # Skip models that are too large to train
     model_size = model_size_b(net) / MiB
@@ -102,6 +111,7 @@ def objective(trial: optuna.Trial) -> float:
                 "flops_giga": f"{giga_flops:.3f}",
                 "initial_channels": initial_channels,
                 "levels": levels,
+                "upsampling_method": upsampling_method,
                 "num_residual_layers": num_residual_layers,
                 "cond_dim": cond_dim,
                 "label_dropout_rate": f"{eta:.2f}",
@@ -113,32 +123,58 @@ def objective(trial: optuna.Trial) -> float:
             }
         )
 
+        # Reset the generator to ensure identical data sampling across trials for fair comparison
+        path.p_data.reset_generator()
+
         # Train and get validation loss
-        run_id, val_loss = trainer.train(
-            num_epochs=1000,
-            device=device,
-            lr=lr,
-            batch_size=128,
-            val_split=0.2,  # Use 20% of data for validation
-        )
+        try:
+            run_id, val_loss = trainer.train(
+                num_epochs=1000,
+                device=device,
+                lr=lr,
+                batch_size=128,
+            )
 
-        mlflow.log_metric("val_loss", val_loss, run_id=run_id)
+            mlflow.log_metric("val_loss", val_loss, run_id=run_id)
 
-        # Optimize for validation loss (lower is better)
-        return val_loss
+            # Optimize for validation loss (lower is better)
+            return val_loss
+        except optuna.TrialPruned:
+            mlflow.set_tag("status", "pruned_during_training")
+            mlflow.end_run(status="KILLED")
+            raise optuna.TrialPruned(
+                "Trial pruned during training due to early stopping"
+            )
+        except Exception as e:
+            mlflow.log_param("exception", str(e))
+            mlflow.end_run(status="FAILED")
+            raise e
 
 
 if __name__ == "__main__":
+    # Set seeds for reproducibility
+    torch.manual_seed(42)
+
     mlflow.set_experiment("transformer_tfilm_unet")
 
-    study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=30)
+    study = optuna.create_study(
+        direction="minimize",
+        pruner=MedianPruner(
+            n_startup_trials=20,
+            n_warmup_steps=50,
+            interval_steps=10,
+            n_min_trials=5,
+        ),
+    )
+    study.optimize(objective, n_trials=100)
 
     print("Best trial:", study.best_trial.number)
     print("Best value:", study.best_value)
     print("Best params:", study.best_params)
 
     mlflow.set_experiment("best_models_retrained")
+
+    path.p_data.reset_generator()  # Reset generator before retraining best model
 
     with mlflow.start_run(run_name="transformer_tfilm_unet") as run:
         run_id = run.info.run_id
@@ -150,6 +186,7 @@ if __name__ == "__main__":
             input_channels=3,
             initial_channels=study.best_params["initial_channels"],
             levels=study.best_params["levels"],
+            upsampling_method=study.best_params["upsampling_method"],
             num_residual_layers=study.best_params["num_residual_layers"],
             num_classes=3,
             cond_dim=study.best_params["cond_dim"],
@@ -162,32 +199,53 @@ if __name__ == "__main__":
             path=path,
             model=model,
             eta=study.best_params["label_dropout_rate"],
-            null_label=0,
+            stopper=EarlyStopping(patience=50),
         )
         _, val_loss = trainer.train(
             num_epochs=1000,
             device=device,
             lr=study.best_params["learning_rate"],
             batch_size=128,
-            val_split=0.2,
         )
         # Log the best model
-        mlflow.pytorch.log_model(
-            model, artifact_path="best_standard_tfilm_model", run_id=run_id
-        )
+        mlflow.pytorch.log_model(model, name="best_transformer_tfilm", run_id=run_id)
 
         # Log final validation loss
         mlflow.log_param("final_val_loss", val_loss, run_id=run_id)
 
         # Generate samples for evaluation
         with torch.no_grad():
-            real_sensor_data, real_labels = path.p_data.sample(10000)
-            generated_sensor_data = model.sample(10000, p_data_shape=[3, 128])
+            guidance_scales = [2.0, 3.0, 4.0]
+            guidance_real_data = []
+            guidance_generated_data = []
+
+            # Sample real data once for all guidance scales
+            real_data_all_classes = []
+            for class_idx in range(1, 4):
+                real_sensor_data, _ = path.p_data.sample(10000, class_idx=class_idx)
+                real_data_all_classes.append(real_sensor_data)
+
+            # Append the real data for all classes as a single entry in the guidance_real_data list
+            guidance_real_data.append(real_data_all_classes)
+
+            # Generate samples for each guidance scale
+            for guidance_scale in guidance_scales:
+                generated_per_scale = [
+                    model.sample(
+                        10000,
+                        p_data_shape=[3, 128],
+                        class_idx=class_idx,
+                        guidance_scale=guidance_scale,
+                    )
+                    for class_idx in range(1, 4)
+                ]
+                guidance_generated_data.append(generated_per_scale)
 
         # Compute metrics
         metrics = compute_all_metrics(
-            real_data=real_sensor_data,
-            generated_data=generated_sensor_data,
+            real_data=guidance_real_data[0],
+            generated_data=guidance_generated_data,
+            used_guidance_scales=guidance_scales,
             use_toy=True,
         )
 
