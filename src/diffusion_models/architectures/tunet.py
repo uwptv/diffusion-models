@@ -8,12 +8,11 @@ from diffusion_models.architectures.blocks.base import (
 )
 from diffusion_models.architectures.blocks.decoders import (
     TFiLMDecoderSeperable,
-    TFiLMDecoderTransposed,
 )
 from diffusion_models.architectures.blocks.encoders import (
     TFiLMEncoderSeperable,
 )
-from diffusion_models.architectures.blocks.midcoders import TransFiLMMidcoder
+from diffusion_models.architectures.blocks.midcoders import TransformerMidcoder
 from diffusion_models.architectures.tfilm_unet import TFiLMUNet
 
 
@@ -24,58 +23,40 @@ class TUNet(TFiLMUNet):
 
     def __init__(
         self,
-        channels: List[int],
+        input_channels: int,
+        initial_channels: int,
+        levels: int,
+        upsampling_method: str,
         num_residual_layers: int,
-        num_t_blocks: int,
         num_classes: int,
         cond_dim: int,
-        num_transformer_layers: int = 6,
+        num_tfilm_blocks: int,
+        hidden_size_rnn: int,
+        num_layers_rnn: int,
+        num_heads: int,
+        num_transformer_layers: int,
+        ffn_expansion_factor: int,
     ):
         super().__init__(
-            channels, num_residual_layers, num_t_blocks, num_classes, cond_dim
-        )
-        self.midcoder = TransFiLMMidcoder(
-            channels[-1],
+            input_channels,
+            initial_channels,
+            levels,
+            upsampling_method,
             num_residual_layers,
-            num_transformer_layers=num_transformer_layers,
-            cond_dim=cond_dim,
-        )
-
-
-class TUNetTransposed(TUNet):
-    """
-    TUNet architecture for 1D signals with transposed convolutions in decoders for upsampling."""
-
-    def __init__(
-        self,
-        channels: List[int],
-        num_residual_layers: int,
-        num_t_blocks: int,
-        num_classes: int,
-        cond_dim: int,
-        num_transformer_layers: int = 6,
-    ):
-        super().__init__(
-            channels,
-            num_residual_layers,
-            num_t_blocks,
             num_classes,
             cond_dim,
-            num_transformer_layers,
+            num_tfilm_blocks,
+            hidden_size_rnn,
+            num_layers_rnn,
         )
-
-        decoders = []
-        for curr_c, next_c in zip(channels[:-1], channels[1:]):
-            decoders.append(
-                TFiLMDecoderTransposed(
-                    next_c,
-                    curr_c,
-                    num_residual_layers,
-                    num_t_blocks,
-                    cond_dim,
-                )
-            )
-        self.decoders = nn.ModuleList(reversed(decoders))
+        self.midcoder = TransformerMidcoder(
+            channels=initial_channels * (2**levels),
+            num_residual_layers=num_residual_layers,
+            cond_dim=cond_dim,
+            num_heads=num_heads,
+            num_transformer_layers=num_transformer_layers,
+            ffn_expansion_factor=ffn_expansion_factor,
+        )
 
 
 class TUNetSeperable(TUNet):
