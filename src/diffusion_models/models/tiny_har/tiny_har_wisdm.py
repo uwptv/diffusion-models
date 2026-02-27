@@ -1,43 +1,32 @@
 import torch
 
 from diffusion_models.architectures.tiny_har import TinyHAR
-from diffusion_models.data.synthetic import WaveSampler
-from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath
-from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
+from diffusion_models.data.loaders import DataSampler
 from diffusion_models.trainers import TinyHARTrainer
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Initialize probability path
-path = GaussianConditionalProbabilityPath(
-    p_data=WaveSampler(),
-    p_simple_shape=[3, 100],
-    alpha=LinearAlpha(),
-    beta=LinearBeta(),
-).to(device)
+# Create samplers
+train_sampler = DataSampler(dataset="wisdm", split_type="train")
+val_sampler = DataSampler(dataset="wisdm", split_type="val")
 
-# activity_path = GaussianConditionalProbabilityPath(
-#     p_data=DataSampler(dataset="wisdm"),
-#     p_simple_shape=[3, 100],
-#     alpha=LinearAlpha(),
-#     beta=LinearBeta(),
-# ).to(device)
+# Create model
+model = TinyHAR(input_channels=3, window_size=120, num_classes=6)
 
-# initialize model
-net = TinyHAR(
-    input_channels=3,
-    window_size=100,
-    num_classes=3,
+# Create trainer
+trainer = TinyHARTrainer(
+    model=model,
+    train_sampler=train_sampler,
+    val_sampler=val_sampler,
 )
 
-trainer = TinyHARTrainer(path=path, model=net)
+# Train
 trainer.train(
     num_epochs=1000,
     device=device,
+    name="tiny_har_wisdm",
     lr=1e-3,
-    batch_size=250,
-    name="tiny_har",
-    save_path="checkpoints/tiny_har.pth",
-    confusion_matrix_samples=2000,
-    class_names=["amp1", "amp2", "amp3"],
+    save_model=True,
+    batch_size=128,
+    class_names=["Walking", "Jogging", "Upstairs", "Downstairs", "Sitting", "Standing"],
 )

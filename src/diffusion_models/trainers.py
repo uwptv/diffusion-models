@@ -133,16 +133,25 @@ class CFGTrainer(Trainer):
         path: GaussianConditionalProbabilityPath,
         model: ConditionalVectorField,
         eta: float,
+        train_sampler=None,
+        val_sampler=None,
         **kwargs,
     ):
         assert eta > 0 and eta < 1
         super().__init__(model, **kwargs)
         self.eta = eta
         self.path = path
+        self.train_sampler = train_sampler
+        self.val_sampler = val_sampler
 
-    def _sample_batch(self, batch_size: int):
-        """Sample a batch of data for flow matching."""
-        z, y = self.path.sample_conditioning_variable(batch_size)
+    def _sample_batch(self, batch_size: int, sampler=None):
+        """Sample a batch of data for flow matching from the specified sampler."""
+        if sampler is not None:
+            # Use external sampler (e.g., WISDM data)
+            z, y = sampler.sample(batch_size)
+        else:
+            # Fall back to synthetic data from self.path
+            z, y = self.path.sample_conditioning_variable(batch_size)
 
         mask = torch.rand(batch_size) < self.eta
         y[mask] = 0
@@ -154,12 +163,12 @@ class CFGTrainer(Trainer):
         return x, t, y, u_t
 
     def get_training_loss(self, batch_size: int) -> torch.Tensor:
-        x, t, y, u_t = self._sample_batch(batch_size)
+        x, t, y, u_t = self._sample_batch(batch_size, sampler=self.train_sampler)
         u_t_theta = self.model(x, t, y)
         return torch.mean((u_t - u_t_theta) ** 2)
 
     def get_validation_loss(self, batch_size: int) -> torch.Tensor:
-        x, t, y, u_t = self._sample_batch(batch_size)
+        x, t, y, u_t = self._sample_batch(batch_size, sampler=self.val_sampler)
         with torch.no_grad():
             u_t_theta = self.model(x, t, y)
         return torch.mean((u_t - u_t_theta) ** 2)
@@ -168,49 +177,16 @@ class CFGTrainer(Trainer):
 class TinyHARTrainer(Trainer):
     def __init__(
         self,
-        path: GaussianConditionalProbabilityPath,
-        model: ConditionalVectorField,
-        **kwargs,
+        model: nn.Module,
+        train_sampler,
+        val_sampler,
     ):
-        super().__init__(model, **kwargs)
-        self.path = path
+        self.model = model
+        self.train_sampler = train_sampler
+        self.val_sampler = val_sampler
 
-    def get_loss(self, batch_size: int, val_split: float):
-        # Sample data points and labels
-        x, labels = self.path.sample_conditioning_variable(
-            batch_size
-        )  # (batch_size, c, x_dim), (batch_size, 1)
-        # Provide cross-entropy loss with class indices
-        labels = (labels.squeeze(1) - 1).long()
-
-        # Split into training and validation sets
-        split_idx = int(batch_size * (1 - val_split))
-        x_train, x_val = x[:split_idx], x[split_idx:]
-        labels_train, labels_val = labels[:split_idx], labels[split_idx:]
-
-        # Regress and output loss
-        train_pred = self.model(x_train)  # (batch_size, num_classes)
-        val_pred = self.model(x_val)  # (batch_size, num_classes)
-
-        # Provide cross-entropy loss with logits from the model and class indices from the data
-        train_loss = nn.CrossEntropyLoss()(train_pred, labels_train)
-        val_loss = nn.CrossEntropyLoss()(val_pred, labels_val)
-
-        return train_loss, val_loss
-
-    def _default_checkpoint_config(self) -> dict:
-        config = {}
-        for key in ("input_channels", "window_size", "num_classes", "num_filters"):
-            if hasattr(self.model, key):
-                config[key] = getattr(self.model, key)
-        return config
-
-    def _save_checkpoint(self, save_path: str, config: dict) -> None:
-        save_path = Path(save_path)
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(
-            {"model_state": self.model.state_dict(), "config": config}, save_path
-        )
+    def get_optimizer(self, lr: float):
+        return torch.optim.Adam(self.model.parameters(), lr=lr)
 
     def _get_num_classes(self) -> int | None:
         if hasattr(self.model, "num_classes"):
@@ -222,7 +198,8 @@ class TinyHARTrainer(Trainer):
         return None
 
     def _normalize_labels(self, labels: torch.Tensor) -> torch.Tensor:
-        labels = labels.squeeze(1).long()
+        """Normalize labels to 0-indexed for CrossEntropyLoss."""
+        labels = labels.squeeze(-1).long()
         num_classes = self._get_num_classes()
         if num_classes is not None:
             min_val = int(labels.min().item())
@@ -231,8 +208,24 @@ class TinyHARTrainer(Trainer):
                 labels = labels - 1
         return labels
 
-    def _compute_confusion_matrix(self, num_samples: int, device: torch.device):
-        x, labels = self.path.sample_conditioning_variable(num_samples)
+    def get_training_loss(self, batch_size: int) -> torch.Tensor:
+        """Compute training loss from the training sampler."""
+        x, labels = self.train_sampler.sample(batch_size)
+        labels = self._normalize_labels(labels)
+        train_pred = self.model(x)
+        return nn.CrossEntropyLoss()(train_pred, labels)
+
+    def get_validation_loss(self, batch_size: int) -> torch.Tensor:
+        """Compute validation loss from the validation sampler."""
+        x, labels = self.val_sampler.sample(batch_size)
+        labels = self._normalize_labels(labels)
+        with torch.no_grad():
+            val_pred = self.model(x)
+        return nn.CrossEntropyLoss()(val_pred, labels)
+
+    def _compute_predictions(self, num_samples: int, device: torch.device):
+        """Helper to compute predictions and labels from validation set."""
+        x, labels = self.val_sampler.sample(num_samples)
         labels = self._normalize_labels(labels)
         x = x.to(device)
 
@@ -240,55 +233,26 @@ class TinyHARTrainer(Trainer):
             logits = self.model(x)
             preds = torch.argmax(logits, dim=1).cpu()
 
+        return labels.cpu().numpy(), preds.numpy()
+
+    def _compute_confusion_matrix(self, num_samples: int, device: torch.device):
+        labels_np, preds_np = self._compute_predictions(num_samples, device)
         num_classes = self._get_num_classes()
-        labels_np = labels.cpu().numpy()
-        preds_np = preds.numpy()
         return confusion_matrix(
             labels_np,
             preds_np,
             labels=list(range(num_classes)) if num_classes is not None else None,
         )
 
-    def _compute_f1_score(
-        self, num_samples: int, device: torch.device
-    ) -> dict[str, float]:
-        """Compute F1 scores for the classifier.
-
-        Returns:
-            Dictionary with 'macro' and 'weighted' F1 scores.
-        """
-        x, labels = self.path.sample_conditioning_variable(num_samples)
-        labels = self._normalize_labels(labels)
-        x = x.to(device)
-
-        with torch.no_grad():
-            logits = self.model(x)
-            preds = torch.argmax(logits, dim=1).cpu()
-
-        labels_np = labels.cpu().numpy()
-        preds_np = preds.numpy()
-
-        return f1_score(labels_np, preds_np, average="macro"), f1_score(
-            labels_np, preds_np, average="weighted"
+    def _compute_f1_score(self, num_samples: int, device: torch.device):
+        labels_np, preds_np = self._compute_predictions(num_samples, device)
+        return (
+            f1_score(labels_np, preds_np, average="macro"),
+            f1_score(labels_np, preds_np, average="weighted"),
         )
 
     def _compute_accuracy(self, num_samples: int, device: torch.device) -> float:
-        """Compute classification accuracy.
-
-        Returns:
-            Accuracy score between 0 and 1.
-        """
-        x, labels = self.path.sample_conditioning_variable(num_samples)
-        labels = self._normalize_labels(labels)
-        x = x.to(device)
-
-        with torch.no_grad():
-            logits = self.model(x)
-            preds = torch.argmax(logits, dim=1).cpu()
-
-        labels_np = labels.cpu().numpy()
-        preds_np = preds.numpy()
-
+        labels_np, preds_np = self._compute_predictions(num_samples, device)
         return accuracy_score(labels_np, preds_np)
 
     def _save_confusion_matrix(
@@ -316,29 +280,58 @@ class TinyHARTrainer(Trainer):
         device: torch.device,
         name: str,
         lr: float = 1e-3,
-        save_path: str | None = None,
-        config: dict | None = None,
+        batch_size: int = 64,
+        save_model: bool = False,
         confusion_matrix_samples: int | None = 1000,
         class_names: list[str] | None = None,
-        **kwargs,
     ):
+        """Train the TinyHAR classifier with MLflow logging."""
+        mlflow.set_experiment("TinyHAR_WISDM")
+
         with mlflow.start_run(run_name=name):
-            run_id, val_loss = super().train(
-                num_epochs=num_epochs, device=device, lr=lr, **kwargs
-            )
+            # Log hyperparameters
+            mlflow.log_param("lr", lr)
+            mlflow.log_param("batch_size", batch_size)
+            mlflow.log_param("num_epochs", num_epochs)
 
-            if save_path:
-                if config is None:
-                    config = self._default_checkpoint_config()
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    tmp_path = Path(tmpdir) / name
-                    self._save_checkpoint(str(tmp_path), config)
-                    mlflow.pytorch.log_model(
-                        self.model,
-                        name=name,
-                        run_id=run_id,
-                    )
+            self.model.to(device)
+            self.train_sampler.to(device)
+            self.val_sampler.to(device)
+            opt = self.get_optimizer(lr)
 
+            pbar = tqdm(range(num_epochs))
+            for idx in pbar:
+                # Training step
+                self.model.train()
+                opt.zero_grad()
+                train_loss = self.get_training_loss(batch_size)
+                train_loss.backward()
+                opt.step()
+
+                # Validation step
+                self.model.eval()
+                val_loss = self.get_validation_loss(batch_size)
+                loss_val = val_loss.item()
+                loss_train = train_loss.item()
+
+                # Log metrics
+                mlflow.log_metric("train_loss", loss_train, step=idx)
+                mlflow.log_metric("val_loss", loss_val, step=idx)
+
+                pbar.set_description(
+                    f"Epoch {idx}, train: {loss_train:.4f}, val: {loss_val:.4f}"
+                )
+
+            self.model.eval()
+
+            # Save model checkpoint
+            if save_model:
+                mlflow.pytorch.log_model(
+                    self.model,
+                    name=f"{name}_model",
+                )
+
+            # Compute and log confusion matrix
             if confusion_matrix_samples:
                 cm = self._compute_confusion_matrix(confusion_matrix_samples, device)
                 with tempfile.TemporaryDirectory() as tmpdir:
@@ -346,17 +339,13 @@ class TinyHARTrainer(Trainer):
                     self._save_confusion_matrix(
                         cm, str(tmp_path), class_names=class_names
                     )
-                    mlflow.log_artifact(
-                        str(tmp_path), artifact_path="plots", run_id=run_id
-                    )
+                    mlflow.log_artifact(str(tmp_path), artifact_path="plots")
 
-            # Log F1 scores and accuracy
-            f1_score_weighted, f1_score_macro = self._compute_f1_score(
+            # Log final metrics
+            f1_macro, f1_weighted = self._compute_f1_score(
                 confusion_matrix_samples, device
             )
-            accuracy_score = self._compute_accuracy(confusion_matrix_samples, device)
-            mlflow.log_metric("f1_score_weighted", f1_score_weighted, run_id=run_id)
-            mlflow.log_metric("f1_score_macro", f1_score_macro, run_id=run_id)
-            mlflow.log_metric("accuracy", accuracy_score, run_id=run_id)
-
-            return run_id, val_loss
+            acc = self._compute_accuracy(confusion_matrix_samples, device)
+            mlflow.log_metric("f1_score_macro", f1_macro)
+            mlflow.log_metric("f1_score_weighted", f1_weighted)
+            mlflow.log_metric("accuracy", acc)

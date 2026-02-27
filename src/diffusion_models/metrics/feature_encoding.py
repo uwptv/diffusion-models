@@ -4,7 +4,7 @@ import torch
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Get tinyhar for feature extraction
-TinyHAR = mlflow.pytorch.load_model("models:/TinyHAR/2").to(device)
+TinyHARwisdm = mlflow.pytorch.load_model("models:/TinyHARwisdm/1").to(device)
 TinyHARToy = mlflow.pytorch.load_model("models:/TinyHARToy/1").to(device)
 
 
@@ -23,7 +23,7 @@ def extract_features(
     - features: tensor of shape (N, feature_dim)
     """
     features = []
-    model = TinyHARToy if use_toy else TinyHAR
+    model = TinyHARToy if use_toy else TinyHARwisdm
     with torch.no_grad():
         for i in range(0, len(data), batch_size):
             batch = data[i : i + batch_size].to(device)  # (batch_size, C, L)

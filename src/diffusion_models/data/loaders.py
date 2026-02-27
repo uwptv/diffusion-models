@@ -67,7 +67,8 @@ class DataSampler(nn.Module, Sampleable):
         self,
         dataset: str = "wisdm",
         seed: int = 42,
-        window_time: float = 5.0,
+        window_time: float = 6.0,
+        split_type: str = "train",
     ):
         super().__init__()
         # create cfg for dataset
@@ -96,23 +97,50 @@ class DataSampler(nn.Module, Sampleable):
         loader = Loader(session_df, window_df, post_pipeline.samples_dir, samples)
         adapter = TorchAdapter(cfg, loader, split)
         dataloaders = adapter.get_dataloaders(batch_size=64)
-        self.dataloader = dataloaders["train"]
+        self.train_dataloader = dataloaders["train"]
+        self.val_dataloader = dataloaders["val"]
         self.dummy = nn.Buffer(
             torch.zeros(1)
         )  # Will automatically be moved when self.to(...) is called
 
-    def sample(self, num_samples: int) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    def sample(
+        self,
+        num_samples: int,
+        dataloader: str = "train",
+        class_idx: Optional[int] = None,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Args:
             - num_samples: the desired number of samples
+            - dataloader: which dataloader to sample from ("train" or "val")
+            - class_idx: if provided, only sample from this class (1-6 for WISDM, where 0 is unconditional)
         Returns:
             - samples: shape (batch_size, channels, signal_length)
-            - labels: shape (batch_size, label_dim) or None
+            - labels: shape (batch_size, label_dim) with values 1-6 (0 reserved for unconditional)
         """
         samples_list = []
         labels_list = []
 
-        for batch_labels, batch_samples in self.dataloader:
+        if dataloader == "train":
+            dl = self.train_dataloader
+        elif dataloader == "val":
+            dl = self.val_dataloader
+        else:
+            raise ValueError(f"Unknown dataloader: {dataloader}")
+
+        for batch_labels, batch_samples in dl:
+            # Filter by class if class_idx is specified
+            if class_idx is not None:
+                # batch_labels shape: (batch_size,) or (batch_size, 1)
+                mask = batch_labels.squeeze() == (
+                    class_idx - 1
+                )  # Adjust for 0-based indexing
+                batch_samples = batch_samples[mask]
+                batch_labels = batch_labels[mask]
+
+            if batch_samples.shape[0] == 0:
+                continue  # Skip empty batches
+
             samples_list.append(batch_samples)
             labels_list.append(batch_labels)
 
@@ -120,9 +148,17 @@ class DataSampler(nn.Module, Sampleable):
             if total_samples >= num_samples:
                 break
 
+        if len(samples_list) == 0:
+            raise ValueError(
+                f"No samples found for class {class_idx} in {dataloader} set"
+            )
+
         # Concatenate and slice to exact number
         samples = torch.cat(samples_list, dim=0)[:num_samples].to(self.dummy.device)
         labels = torch.cat(labels_list, dim=0)[:num_samples].to(self.dummy.device)
+
+        # Add 1 to labels to reserve 0 for unconditional generation
+        labels = labels + 1
 
         # Permute samples to have shape (num_samples, channels, signal_length)
         samples = samples.permute(0, 2, 1)
@@ -134,7 +170,7 @@ class DataSampler(nn.Module, Sampleable):
         return samples, labels
 
 
-# samples, labels = DataSampler(dataset="wisdm").sample(10)
+# samples, labels = DataSampler(dataset="wisdm").sample(10, "val")
 # print(f"Samples data: {samples}, Labels data: {labels}")
 
 
