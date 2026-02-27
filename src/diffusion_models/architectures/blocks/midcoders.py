@@ -3,9 +3,9 @@ import torch.nn as nn
 
 from diffusion_models.architectures.blocks.base import (
     CBAM,
+    HAResidualLayer,
     MBConv,
     ResidualLayer,
-    ResidualLayer4D,
     SinusoidalEmbedding,
 )
 from diffusion_models.architectures.blocks.tfilm import TFiLM, TFiLMTransformer
@@ -103,16 +103,16 @@ class MBConvMidcoder(Midcoder1D):
         return x
 
 
-class Midcoder4D(Midcoder1D):
+class HAMidcoder(Midcoder1D):
     def __init__(
         self,
-        channels: int,
+        features: int,
         num_residual_layers: int,
         cond_dim: int,
     ):
-        super().__init__(channels, num_residual_layers, cond_dim)
+        super().__init__(features, num_residual_layers, cond_dim)
         self.res_blocks = nn.ModuleList(
-            [ResidualLayer4D(channels, cond_dim) for _ in range(num_residual_layers)]
+            [HAResidualLayer(features, cond_dim) for _ in range(num_residual_layers)]
         )
 
 

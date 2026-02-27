@@ -165,7 +165,7 @@ class ResidualLayer(nn.Module):
         return x + res
 
 
-class ResidualLayer4D(ResidualLayer):
+class HAResidualLayer(ResidualLayer):
     def __init__(
         self,
         features: int,
@@ -174,7 +174,6 @@ class ResidualLayer4D(ResidualLayer):
         super().__init__(
             features,
             cond_dim,
-            num_groups=features // 4,
         )
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
@@ -185,7 +184,7 @@ class ResidualLayer4D(ResidualLayer):
         Returns:
         - output: same shape as x
         """
-        # Merge batch and channels for convolution
+        # Merge batch and channels
         bs, channels, L, features = x.shape
         x = x.permute(0, 1, 3, 2).reshape(
             bs * channels, features, L
@@ -222,8 +221,8 @@ class CrossChannelAttention(nn.Module):
         self,
         num_channels: int,
         feature_dim: int,
-        num_heads: int = 4,
-        num_layers: int = 1,
+        num_heads: int,
+        num_layers: int,
         dropout: float = 0.0,
     ):
         super().__init__()
@@ -432,37 +431,6 @@ class SeperableConv1D(nn.Module):
         return x
 
 
-class DepthwiseConv1D(nn.Module):
-    def __init__(
-        self,
-        channels_in: int,
-        filters_per_channel: int,
-        kernel_size: int = 3,
-        padding: int = 0,
-        stride: int = 1,
-    ):
-        super().__init__()
-        self.depthwise = nn.Conv1d(
-            channels_in,
-            filters_per_channel * channels_in,
-            kernel_size=kernel_size,
-            padding=padding,
-            stride=stride,
-            groups=channels_in,
-        )
-
-    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-        - x: (bs, c_in, L)
-        - cond_embed: (bs, cond_dim)
-        Returns:
-
-        """
-        x = self.depthwise(x)  # (bs, filters_per_channel * c_in, L)
-        return x
-
-
 class DepthwiseConv1DExplicit(nn.Module):
     """
     Explicit depthwise separable 1D convolution where all channels use the same set of filters.
@@ -481,10 +449,8 @@ class DepthwiseConv1DExplicit(nn.Module):
     def __init__(
         self,
         channels_in: int,
+        cond_dim: int,
         filters_per_channel: int,
-        kernel_size: int,
-        stride: int = 1,
-        padding: int = 0,
     ):
         super().__init__()
         self.channels_in = channels_in
@@ -495,16 +461,17 @@ class DepthwiseConv1DExplicit(nn.Module):
         self.depthwise_conv = nn.Conv1d(
             in_channels=1,
             out_channels=filters_per_channel,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-            bias=False,
+            kernel_size=3,
+            padding=1,
         )
+        self.norm = AdaGroupNorm(num_channels=filters_per_channel, cond_dim=cond_dim)
+        self.activation = nn.SiLU()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
         Args:
             x: Input tensor of shape (B, C, L)
+            cond_embed: Condition embedding of shape (B, cond_dim)
 
         Returns:
             Output tensor of shape (B, C, L_out, F)
@@ -517,6 +484,12 @@ class DepthwiseConv1DExplicit(nn.Module):
 
         # Apply shared convolution: (B*C, 1, L) -> (B*C, F, L_out)
         features = self.depthwise_conv(x_reshaped)
+
+        # Expand the cond_embed to match the new batch size (B*C, cond_dim)
+        cond_expanded = cond_embed.repeat_interleave(C, dim=0)
+
+        features = self.norm(features, cond_expanded)
+        features = self.activation(features)
 
         # Reshape back: (B*C, F, L_out) -> (B, C, L_out, F)
         _, F, L_out = features.shape

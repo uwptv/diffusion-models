@@ -5,9 +5,9 @@ from diffusion_models.architectures.blocks.base import (
     CBAM,
     AdaGroupNorm,
     CrossChannelAttention,
+    HAResidualLayer,
     MBConv,
     ResidualLayer,
-    ResidualLayer4D,
     SeperableConv1D,
     get_activation,
 )
@@ -324,21 +324,24 @@ class HAEncoder(nn.Module):
         features_out: int,
         cond_dim: int,
         num_residual_layers: int,
-        activation: str = "relu",
+        num_tfilm_blocks: int,
+        hidden_size_rnn: int,
+        num_layers_rnn: int,
+        num_cc_heads: int,
+        num_cc_layers: int,
+        activation: str = "silu",
     ):
         super().__init__()
         self.features_in = features_in
         self.features_out = features_out
         self.cond_dim = cond_dim
         self.activation = get_activation(activation)
-        self.norm = AdaGroupNorm(
-            num_groups=channels, num_channels=channels, cond_dim=cond_dim
-        )
+        self.norm = AdaGroupNorm(num_channels=features_out, cond_dim=cond_dim)
 
         # Define Layers
         self.res_blocks = nn.ModuleList(
             [
-                ResidualLayer4D(
+                HAResidualLayer(
                     features_in,
                     cond_dim,
                 )
@@ -350,12 +353,15 @@ class HAEncoder(nn.Module):
             features_in, features_out, kernel_size=3, padding=1, stride=2
         )
         self.cc_attention = CrossChannelAttention(
-            feature_dim=features_out,
-            num_heads=4,
-            num_layers=6,
+            channels,
+            features_out,
+            num_cc_heads,
+            num_cc_layers,
         )
 
-        self.temporal_attention = TFiLM(8, features_out, rnn_hidden=128)
+        self.temporal_attention = TFiLM(
+            num_tfilm_blocks, features_out, hidden_size_rnn, num_layers_rnn
+        )
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
@@ -378,15 +384,15 @@ class HAEncoder(nn.Module):
 
         # Conv: (bs * channels, features_in, L) -> (bs * channels, features_out, L // 2)
         x = self.conv(x)
+        x = self.norm(
+            x, cond_embed.repeat_interleave(c, dim=0)
+        )  # (bs * channels, features_out, L // 2)
+        x = self.activation(x)
 
         # Reshape back to 4D
         x = x.reshape(bs, c, self.features_out, seq_len // 2).permute(
             0, 1, 3, 2
         )  # (bs, channels, L // 2, features_out)
-
-        # Apply normalization and activation
-        x = self.norm(x, cond_embed)
-        x = self.activation(x)
 
         # Cross-Channel Attention: (bs, channels, L // 2, features_out) -> (bs, channels, L // 2, features_out)
         x = self.cc_attention(x)
@@ -398,8 +404,8 @@ class HAEncoder(nn.Module):
             bs * c, feat_dim, seq_len
         )  # (bs*c, features_out, L//2)
 
-        # Temporal Attention: (bs, channels, L // 2, features_out) -> (bs, channels, L // 2, features_out)
-        x = self.temporal_attention(x)
+        # Appy temporal attention: (bs*c, features_out, L//2) -> (bs*c, features_out, L//2)
+        x = self.temporal_attention(x, cond_embed)
 
         x = x.reshape(bs, c, feat_dim, seq_len).permute(
             0, 1, 3, 2

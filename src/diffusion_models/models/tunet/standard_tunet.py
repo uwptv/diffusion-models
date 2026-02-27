@@ -154,7 +154,7 @@ if __name__ == "__main__":
             n_min_trials=5,
         ),
     )
-    study.optimize(objective, n_trials=150)
+    study.optimize(objective, n_trials=100)
 
     print("Best trial:", study.best_trial.number)
     print("Best value:", study.best_value)

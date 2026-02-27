@@ -74,18 +74,17 @@ def count_flops(model, channels: int, seq_len: int, batch_size=1, device=device)
     """
     # 1. Put model in eval mode (critical for BatchNorm/Dropout behavior)
     model.eval()
-    model.to(device)
+    model.to("cpu")
 
     # 2. Construct dummy inputs matching your architecture
     # x: (batch, channels, length)
-    x_dummy = torch.randn(batch_size, channels, seq_len).to(device)
+    x_dummy = torch.randn(batch_size, channels, seq_len)
 
     # t: (batch, 1, 1) - Diffusion timestep
-    t_dummy = torch.randn(batch_size, 1, 1).to(device)
+    t_dummy = torch.randn(batch_size, 1, 1)
 
     # y: (batch, 1) - Class labels (int64/long)
-    # Adjust 10 to your actual number of classes
-    y_dummy = torch.randint(0, 4, (batch_size, 1)).to(device)
+    y_dummy = torch.randint(0, 4, (batch_size, 1))
 
     # 3. Use fvcore to analyze the forward pass
     # Inputs must be a tuple in the exact order of your forward(self, x, t, y)
