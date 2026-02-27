@@ -37,6 +37,9 @@ class Decoder1D(nn.Module):
         )
         self.norm = AdaGroupNorm(num_channels=channels_out, cond_dim=cond_dim)
         self.activation = get_activation(activation)
+        self.refinement = nn.Conv1d(
+            channels_out, channels_out, kernel_size=3, padding=1
+        )
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
@@ -46,6 +49,11 @@ class Decoder1D(nn.Module):
         """
         # Upsample: (bs, c_in, L) -> (bs, c_out, 2*L)
         x = self.upsample(x)
+        x = self.norm(x, cond_embed)
+        x = self.activation(x)
+
+        # Refine the upsampled features
+        x = self.refinement(x)
         x = self.norm(x, cond_embed)
         x = self.activation(x)
 
@@ -74,11 +82,24 @@ class CBAMDecoder(Decoder1D):
         self.cbam = CBAM(channels_out, cbam_reduction_ratio, cbam_kernel_size)
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
-        # Pass through base encoder block
-        x = super().forward(x, cond_embed)
+        """
+        Args:
+        - x: (bs, c_in, L)
+        - cond_embed: (bs, cond_dim)
+        """
+        # Upsample: (bs, c_in, L) -> (bs, c_out, 2*L)
+        x = self.upsample(x)
+        x = self.norm(x, cond_embed)
+        x = self.activation(x)
 
-        # Enhance with CBAM: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
-        x = self.cbam(x)
+        # Refine the upsampled features
+        x = self.cbam(x, cond_embed)
+        x = self.norm(x, cond_embed)
+        x = self.activation(x)
+
+        # Pass through residual blocks: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
+        for block in self.res_blocks:
+            x = block(x, cond_embed)
 
         return x
 
@@ -117,6 +138,11 @@ class MBConvDecoder(Decoder1D):
         )
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c_in, L)
+        - cond_embed: (bs, cond_dim)
+        """
         # Upsample, Normalize, Activate
         x = self.upsample(x)
         x = self.norm(x, cond_embed)
@@ -164,6 +190,9 @@ class TFiLMDecoder(nn.Module):
             rnn_hidden=hidden_size_rnn,
             rnn_layers=num_layers_rnn,
         )
+        self.refinement = nn.Conv1d(
+            channels_out, channels_out, kernel_size=3, padding=1
+        )
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
@@ -175,6 +204,11 @@ class TFiLMDecoder(nn.Module):
         """
         # Upsample: (bs, c_in, L) -> (bs, c_out, 2*L)
         x = self.upsample(x)
+        x = self.norm(x, cond_embed)
+        x = self.activation(x)
+
+        # Refine the upsampled features
+        x = self.refinement(x)
         x = self.norm(x, cond_embed)
         x = self.activation(x)
 
@@ -224,70 +258,63 @@ class TransFiLMDecoder(TFiLMDecoder):
         )
 
 
-class TFiLMDecoderTransposed(TFiLMDecoder):
+class SeperableTFiLMDecoder(TFiLMDecoder):
     def __init__(
         self,
         channels_in: int,
         channels_out: int,
+        method: str,
         num_residual_layers: int,
-        num_tfilm_blocks: int,
         cond_dim: int,
-        conv_kernel_size: int = 3,
-        conv_stride: int = 2,
-        conv_padding: int = 1,
-        conv_output_padding: int = 1,
-        use_transformer: bool = False,
+        num_tfilm_blocks: int,
+        hidden_size_rnn: int,
+        num_layers_rnn: int,
+        filters_per_channel: int,
     ):
         super().__init__(
             channels_in,
             channels_out,
+            method,
             num_residual_layers,
-            num_tfilm_blocks,
             cond_dim,
-            use_transformer=use_transformer,
+            num_tfilm_blocks,
+            hidden_size_rnn,
+            num_layers_rnn,
         )
-        self.upsample = nn.ConvTranspose1d(
-            channels_in,
+        self.refinement = SeperableConv1D(
             channels_out,
-            kernel_size=conv_kernel_size,
-            stride=conv_stride,
-            padding=conv_padding,
-            output_padding=conv_output_padding,
+            channels_out,
+            cond_dim,
+            filters_per_channel,
+            stride=1,
         )
 
+    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c_in, L)
+        - cond_embed: (bs, cond_dim)
+        Returns:
+        - x: (bs, c_out, 2*L)
+        """
+        # Upsample: (bs, c_in, L) -> (bs, c_out, 2*L)
+        x = self.upsample(x)
+        x = self.norm(x, cond_embed)
+        x = self.activation(x)
 
-class TFiLMDecoderSeperable(TFiLMDecoder):
-    def __init__(
-        self,
-        channels_in: int,
-        channels_out: int,
-        num_residual_layers: int,
-        num_tfilm_blocks: int,
-        cond_dim: int,
-        conv_kernel_size: int = 3,
-        conv_stride: int = 1,
-        conv_padding: int = 1,
-        use_transformer: bool = False,
-    ):
-        super().__init__(
-            channels_in,
-            channels_out,
-            num_residual_layers,
-            num_tfilm_blocks,
-            cond_dim,
-            use_transformer=use_transformer,
-        )
-        self.upsample = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode="linear", align_corners=False),
-            SeperableConv1D(
-                channels_in,
-                channels_out,
-                filters_per_channel=4,
-                kernel_size=conv_kernel_size,
-                padding=conv_padding,
-                stride=conv_stride,
-            ),
-        )
+        # Refine the upsampled features with separable convolution
+        x = self.refinement(x, cond_embed)
+        x = self.norm(x, cond_embed)
+        x = self.activation(x)
+
+        # Apply TFiLM: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
+        x = self.tfilm(x, cond_embed)
+
+        # Pass through residual blocks: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
+        for block in self.res_blocks:
+            x = block(x, cond_embed)
+
+        return x
 
 
 class HADecoder(nn.Module):

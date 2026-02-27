@@ -80,9 +80,7 @@ class Encoder1D(nn.Module):
 
         # Downsample: (bs, c_in, L) -> (bs, c_out, L // 2)
         x = self.downsample(x)
-        x = self.norm(
-            x, cond_embed
-        )  # Commented out normalization for better comparison with other models
+        x = self.norm(x, cond_embed)
         x = self.activation(x)
 
         return x
@@ -258,41 +256,58 @@ class TransFiLMEncoder(TFiLMEncoder):
         )
 
 
-class TFiLMEncoderSeperable(TFiLMEncoder):
+class SeperableTFiLMEncoder(TFiLMEncoder):
     def __init__(
         self,
         channels_in: int,
         channels_out: int,
+        cond_dim: int,
         num_residual_layers: int,
         num_tfilm_blocks: int,
-        cond_dim: int,
+        hidden_size_rnn: int,
+        num_layers_rnn: int,
+        filters_per_channel: int,
         activation: str = "silu",
-        conv_kernel_size: int = 3,
-        conv_stride: int = 1,
-        conv_padding: int = 1,
-        use_transformer: bool = False,
     ):
         super().__init__(
             channels_in,
             channels_out,
             num_residual_layers,
-            num_tfilm_blocks,
             cond_dim,
+            num_tfilm_blocks,
+            hidden_size_rnn,
+            num_layers_rnn,
             activation,
-            conv_kernel_size,
-            conv_stride,
-            conv_padding,
-            use_transformer,
         )
         # Replace downsample with SeperableConv1D
         self.downsample = SeperableConv1D(
-            channels_in=channels_in,
-            channels_out=channels_out,
-            filters_per_channel=4,
-            kernel_size=conv_kernel_size,
+            channels_in,
+            channels_out,
+            cond_dim,
+            filters_per_channel,
             stride=2,
-            padding=conv_padding,
         )
+        self.activation = (
+            nn.Identity()
+        )  # Remove activation here since SeperableConv1D already has it
+
+    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, c_in, L)
+        - cond_embed: (bs, cond_dim)
+        """
+        # Pass through residual blocks: (bs, c_in, L) -> (bs, c_in, L)
+        for block in self.res_blocks:
+            x = block(x, cond=cond_embed)
+
+        # Downsample using SeperableConv1D: (bs, c_in, L) -> (bs, c_out, L // 2)
+        x = self.downsample(x, cond_embed)
+
+        # Apply TFiLM: (bs, c_out, L // 2) -> (bs, c_out, L // 2)
+        x = self.tfilm(x, cond_embed)
+
+        return x
 
 
 class HAEncoder(nn.Module):

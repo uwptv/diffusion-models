@@ -21,20 +21,6 @@ path = GaussianConditionalProbabilityPath(
     beta=LinearBeta(),
 ).to(device)
 
-# activity_path = GaussianConditionalProbabilityPath(
-#     p_data=DataSampler(dataset="wisdm"),
-#     p_simple_shape=[3, 100],
-#     alpha=LinearAlpha(),
-#     beta=LinearBeta(),
-# ).to(device)
-
-# visualize generated waves
-# visualize_generated_waves(model=net, guidance_scales=(1.0, 2.0, 4.0))
-# visualize_generated_data_samples(model=net, guidance_scales=(1.0, 2.0, 4.0))
-
-
-# model is large at about 17.4 MiB parameters, trains resonably fast at about 7.7 it/s, empirically samples look pretty good after 1000 epochs, loss is about 0.45 after 1000 epochs
-
 
 def objective(trial: optuna.Trial) -> float:
     # Hyperparameter search space for model architecture

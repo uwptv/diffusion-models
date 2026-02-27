@@ -1,16 +1,13 @@
-from typing import List
-
 import torch.nn as nn
 
 from diffusion_models.architectures.blocks.base import (
-    InitialConvSeperable,
     SeperableConv1D,
 )
 from diffusion_models.architectures.blocks.decoders import (
-    TFiLMDecoderSeperable,
+    SeperableTFiLMDecoder,
 )
 from diffusion_models.architectures.blocks.encoders import (
-    TFiLMEncoderSeperable,
+    SeperableTFiLMEncoder,
 )
 from diffusion_models.architectures.blocks.midcoders import TransformerMidcoder
 from diffusion_models.architectures.tfilm_unet import TFiLMUNet
@@ -59,63 +56,87 @@ class TUNet(TFiLMUNet):
         )
 
 
-class TUNetSeperable(TUNet):
+class SeperableTUNet(TUNet):
     """
     TUNet architecture with separable convolutions for 1D signals
     """
 
     def __init__(
         self,
-        channels: List[int],
+        input_channels: int,
+        initial_channels: int,
+        levels: int,
+        upsampling_method: str,
         num_residual_layers: int,
-        num_t_blocks: int,
         num_classes: int,
         cond_dim: int,
-        input_channels=3,
+        num_tfilm_blocks: int,
+        hidden_size_rnn: int,
+        num_layers_rnn: int,
+        num_heads: int,
+        num_transformer_layers: int,
+        ffn_expansion_factor: int,
+        filters_per_channel: int,
     ):
         super().__init__(
-            channels,
+            input_channels,
+            initial_channels,
+            levels,
+            upsampling_method,
             num_residual_layers,
-            num_t_blocks,
             num_classes,
             cond_dim,
+            num_tfilm_blocks,
+            hidden_size_rnn,
+            num_layers_rnn,
+            num_heads,
+            num_transformer_layers,
+            ffn_expansion_factor,
         )
-        self.init_conv = InitialConvSeperable(
+        self.init_conv = SeperableConv1D(
             input_channels,
-            channels[0],
+            initial_channels,
             cond_dim,
-            filters_per_channel=4,
+            filters_per_channel,
+            stride=1,
         )
+
+        # Double channels every level
+        channels = [initial_channels]
+        for _ in range(levels):
+            channels.append(channels[-1] * 2)
 
         encoders = []
         decoders = []
         for curr_c, next_c in zip(channels[:-1], channels[1:]):
             encoders.append(
-                TFiLMEncoderSeperable(
-                    channels_in=curr_c,
-                    channels_out=next_c,
-                    num_residual_layers=num_residual_layers,
-                    num_tfilm_blocks=num_t_blocks,
-                    cond_dim=cond_dim,
+                SeperableTFiLMEncoder(
+                    curr_c,
+                    next_c,
+                    cond_dim,
+                    num_residual_layers,
+                    num_tfilm_blocks,
+                    hidden_size_rnn,
+                    num_layers_rnn,
+                    filters_per_channel,
                 )
             )
             decoders.append(
-                TFiLMDecoderSeperable(
-                    channels_in=next_c,
-                    channels_out=curr_c,
-                    num_residual_layers=num_residual_layers,
-                    num_tfilm_blocks=num_t_blocks,
-                    cond_dim=cond_dim,
+                SeperableTFiLMDecoder(
+                    next_c,
+                    curr_c,
+                    upsampling_method,
+                    num_residual_layers,
+                    cond_dim,
+                    num_tfilm_blocks,
+                    hidden_size_rnn,
+                    num_layers_rnn,
+                    filters_per_channel,
                 )
             )
         self.encoders = nn.ModuleList(encoders)
         self.decoders = nn.ModuleList(reversed(decoders))
 
-        self.final_conv = SeperableConv1D(
-            channels_in=channels[0],
-            channels_out=input_channels,
-            filters_per_channel=4,
-            kernel_size=3,
-            stride=1,
-            padding=1,
+        self.final_conv = nn.Conv1d(
+            initial_channels, input_channels, kernel_size=3, padding=1
         )

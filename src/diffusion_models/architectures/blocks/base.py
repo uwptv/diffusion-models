@@ -311,6 +311,11 @@ class AdaGroupNorm(nn.Module):
 
         # Use a max of 32 groups and a minimum of 8 groups, or channels//4 if that is in between
         num_groups = min(32, max(4, num_channels // 4))
+
+        # Find largest divisor
+        while num_channels % num_groups != 0:
+            num_groups -= 1
+
         self.group_norm = nn.GroupNorm(num_groups, num_channels, affine=False, eps=1e-6)
         self.linear = nn.Linear(cond_dim, 2 * num_channels)
         # outputs scale (γ) and shift (β)
@@ -380,48 +385,21 @@ class InitialConvolution(nn.Module):
         return x
 
 
-class InitialConvSeperable(InitialConvolution):
-    """
-    Initial convolutional layer using separable convolutions to extend channels to a specified output dimension.
-    Dataflow: Separable Convolution -> Adaptive Group Normalization -> Activation
-    Dimensions: Input (B, in_channels, L) -> Output (B, out_channels, L)
-    """
-
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        cond_dim: int,
-        filters_per_channel: int = 4,
-        activation: str = "silu",
-    ):
-        super().__init__(
-            in_channels, out_channels, cond_dim, use_1d=True, activation=activation
-        )
-        self.conv = SeperableConv1D(
-            channels_in=in_channels,
-            channels_out=out_channels,
-            filters_per_channel=filters_per_channel,
-            kernel_size=3,
-            padding=1,
-        )
-
-
 class SeperableConv1D(nn.Module):
     def __init__(
         self,
         channels_in: int,
         channels_out: int,
+        cond_dim: int,
         filters_per_channel: int,
-        kernel_size: int = 3,
-        stride: int = 1,
+        stride: int,
         padding: int = 1,
     ):
         super().__init__()
         self.depthwise = nn.Conv1d(
             channels_in,
             filters_per_channel * channels_in,
-            kernel_size=kernel_size,
+            kernel_size=3,
             stride=stride,
             padding=padding,
             groups=channels_in,
@@ -429,14 +407,28 @@ class SeperableConv1D(nn.Module):
         self.pointwise = nn.Conv1d(
             filters_per_channel * channels_in, channels_out, kernel_size=1
         )
+        self.activation = nn.SiLU()
+        self.norm1 = AdaGroupNorm(
+            num_channels=filters_per_channel * channels_in, cond_dim=cond_dim
+        )
+        self.norm2 = AdaGroupNorm(num_channels=channels_out, cond_dim=cond_dim)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         """
         Args:
         - x: (bs, c_in, L)
+        - cond: (bs, cond_dim)
         """
+        # Depthwise convolution
         x = self.depthwise(x)  # (bs, filters_per_channel * c_in, L)
+        x = self.norm1(x, cond)  # (bs, filters_per_channel * c_in, L)
+        x = self.activation(x)  # (bs, filters_per_channel * c_in, L)
+
+        # Pointwise convolution
         x = self.pointwise(x)  # (bs, c_out, L)
+        x = self.norm2(x, cond)  # (bs, c_out, L)
+        x = self.activation(x)  # (bs, c_out, L)
+
         return x
 
 
