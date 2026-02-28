@@ -390,14 +390,15 @@ class HADecoder(nn.Module):
         x = self.norm(x, cond_embed.repeat_interleave(c, dim=0))
         x = self.activation(x)
 
-        # Refine the upsampled features with separable convolution
+        # Refine the upsampled features with separable convolution: (bs * channels, features_out, 2*L) -> (bs * channels, features_out, 2*L)
         x = self.refinement(x)
         x = self.norm(x, cond_embed.repeat_interleave(c, dim=0))
         x = self.activation(x)
 
         # Update feature dimension after upsampling
-        feat_dim = x.shape[1]
+        _, feat_out, seq_len = x.shape
 
+        x = self.temporal_attention(x, cond_embed.repeat_interleave(c, dim=0))
         # Reshape back
         x = x.reshape(bs, c, feat_dim, 2 * seq_len).permute(
             0, 1, 3, 2
@@ -410,7 +411,6 @@ class HADecoder(nn.Module):
             bs * c, feat_dim, 2 * seq_len
         )  # (bs * channels, features_out, 2*L)
         # temporal attention: (bs * channels, features_out, 2*L) -> (bs * channels, features_out, 2*L)
-        x = self.temporal_attention(x, cond_embed.repeat_interleave(c, dim=0))
 
         x = x.reshape(bs, c, feat_dim, 2 * seq_len).permute(
             0, 1, 3, 2

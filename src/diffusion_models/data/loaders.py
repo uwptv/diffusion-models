@@ -123,13 +123,13 @@ class DataSampler(nn.Module, Sampleable):
         else:
             raise ValueError(f"Invalid subset: {subset}")
 
-        if class_idx is not None and (class_idx < 1 or class_idx > 6):
-            activity_labels, _, samples = self.loader.sample_items(
-                num_samples, indices=indices, activity_id=class_idx - 1, seed=self.seed
+        if class_idx is not None and (class_idx < 0 or class_idx > 5):
+            raise ValueError(
+                f"Invalid class_idx: {class_idx}. Must be between 0 and 5."
             )
         elif class_idx is not None:
-            raise ValueError(
-                f"Invalid class_idx: {class_idx}. Must be between 1 and 6."
+            activity_labels, _, samples = self.loader.sample_items(
+                num_samples, indices=indices, activity_id=class_idx, seed=self.seed
             )
         else:
             activity_labels, _, samples = self.loader.sample_items(

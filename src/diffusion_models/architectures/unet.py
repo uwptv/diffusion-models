@@ -117,8 +117,9 @@ class UNet(ConditionalVectorField, ABC):
                 (num_samples,), 0, device=device, dtype=torch.long
             )
         else:
+            # Class labels for model are 1-indexed, with 0 reserved for unconditional
             class_labels = torch.full(
-                (num_samples,), class_idx, device=device, dtype=torch.long
+                (num_samples,), class_idx + 1, device=device, dtype=torch.long
             )
 
         # Create timesteps from t=0 to t=1

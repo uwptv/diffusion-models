@@ -1,3 +1,6 @@
+import random
+
+import numpy as np
 import torch
 import torch.nn as nn
 from fvcore.nn import FlopCountAnalysis
@@ -99,3 +102,13 @@ def count_flops(model, channels: int, seq_len: int, batch_size=1, device=device)
     except Exception as e:
         print(f"FLOP calculation failed: {e}")
         return 0.0
+
+
+def seed_everything(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # Critical for deterministic convolutions
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False

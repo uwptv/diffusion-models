@@ -371,47 +371,37 @@ class HAEncoder(nn.Module):
         Returns:
         - x: (bs, channels, L // 2, features_out)
         """
-        bs, c, seq_len, feat_dim = x.shape
+        bs, channels, seq_len, feat_in = x.shape
 
         # Pass through residual blocks: (bs, channels, L, features_in) -> (bs, channels, L, features_in)
         for block in self.res_blocks:
             x = block(x, cond=cond_embed)
 
         # Merge batch and channels for convolution
-        # x = x.permute(0, 1, 3, 2).reshape(
-        #     bs * c, feat_dim, seq_len
-        # )  # (bs * channels, features_in, L)
-        x = x.reshape(bs * c, seq_len, feat_dim).permute(
+        x = x.reshape(bs * channels, seq_len, feat_in).permute(
             0, 2, 1
         )  # (bs * channels, features_in, L)
 
         # Conv: (bs * channels, features_in, L) -> (bs * channels, features_out, L // 2)
         x = self.conv(x)
         x = self.norm(
-            x, cond_embed.repeat_interleave(c, dim=0)
+            x, cond_embed.repeat_interleave(channels, dim=0)
         )  # (bs * channels, features_out, L // 2)
         x = self.activation(x)
 
+        # Apply temporal attention first to avoid too much reshaping
+        x = self.temporal_attention(
+            x, cond_embed
+        )  # (bs * channels, features_out, L // 2)
+
+        _, feat_out, seq_len = x.shape
+
         # Reshape back to 4D
-        x = x.reshape(bs, c, self.features_out, seq_len // 2).permute(
+        x = x.reshape(bs, channels, feat_out, seq_len).permute(
             0, 1, 3, 2
         )  # (bs, channels, L // 2, features_out)
 
         # Cross-Channel Attention: (bs, channels, L // 2, features_out) -> (bs, channels, L // 2, features_out)
         x = self.cc_attention(x)
-
-        # Get the updated dimensions
-        bs, c, seq_len, feat_dim = x.shape
-
-        x = x.permute(0, 1, 3, 2).reshape(
-            bs * c, feat_dim, seq_len
-        )  # (bs*c, features_out, L//2)
-
-        # Appy temporal attention: (bs*c, features_out, L//2) -> (bs*c, features_out, L//2)
-        x = self.temporal_attention(x, cond_embed)
-
-        x = x.reshape(bs, c, feat_dim, seq_len).permute(
-            0, 1, 3, 2
-        )  # (bs, channels, L // 2, features_out)
 
         return x

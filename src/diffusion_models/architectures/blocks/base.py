@@ -279,7 +279,7 @@ class CrossChannelAttention(nn.Module):
         # Reshape to apply attention across channels at each time step
         # (B, C, L, F) -> (B*L, C, F)
         # This treats each timestep independently and applies cross-channel attention
-        x_reshaped = x.permute(0, 2, 1, 3).reshape(B * L, C, F)
+        x_reshaped = x.reshape(B * L, C, F)  # (B*L, C, F)
 
         # Apply transformer layers
         for attn, norm1, ffn, norm2 in zip(

@@ -1,5 +1,7 @@
 import torch
 
+from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath
+
 from .density_coverage import compute_dc
 from .feature_encoding import extract_features
 from .fid import compute_fid
@@ -8,9 +10,10 @@ from .kid import compute_kid
 
 
 def compute_all_metrics(
-    real_data: list[torch.Tensor],
-    generated_data: list[list[torch.Tensor]],
-    used_guidance_scales: list[float],
+    model: torch.nn.Module,
+    path: GaussianConditionalProbabilityPath,
+    num_classes: int,
+    guidance_scales: list[float],
     use_toy: bool,
     batch_size: int = 250,
 ) -> dict[str, float]:
@@ -18,11 +21,8 @@ def compute_all_metrics(
     Compute all implemented quality metrics for generated samples per guidance scale and per class.
 
     Args:
-        real_data: List of real data samples per class, each (N_i, C, L)
-                   Shape: [num_classes][tensor]
-        generated_data: List of generated data per guidance scale per class
-                        Shape: [num_guidance_scales][num_classes][tensor]
-        used_guidance_scales: List of guidance scales used for generating the data
+        model: The trained model to evaluate
+        guidance_scales: List of guidance scales to evaluate
         use_toy: Whether to use the toy TinyHAR model
         batch_size: Batch size for feature extraction
 
@@ -31,11 +31,40 @@ def compute_all_metrics(
         Keys: fid_gs2.0_class_1, fid_gs2.0_class_2, ..., fid_gs2.0_avg,
               fid_gs3.0_class_1, ..., fid_gs3.0_avg
     """
-    num_classes = len(real_data)
+    with torch.no_grad():
+        guidance_real_data = []
+        guidance_generated_data = []
+
+        # Sample real data once for all guidance scales
+        real_data_all_classes = []
+        for class_idx in range(6):  # 6 classes in WISDM dataset
+            real_sensor_data, _ = path.p_data.sample(10000, class_idx=class_idx)
+            real_data_all_classes.append(real_sensor_data)
+
+        # Append the real data for all classes as a single entry in the guidance_real_data list
+        guidance_real_data.append(real_data_all_classes)
+
+        # Generate samples for each guidance scale
+        for guidance_scale in guidance_scales:
+            generated_per_scale = [
+                model.sample(
+                    10000,
+                    p_data_shape=[3, 120],
+                    class_idx=class_idx,
+                    guidance_scale=guidance_scale,
+                )
+                for class_idx in range(6)
+            ]
+            guidance_generated_data.append(generated_per_scale)
+
     metrics = {}
+    real_data = guidance_real_data[0]  # Same real data for all guidance scales
+    generated_data = (
+        guidance_generated_data  # List of generated data per guidance scale
+    )
 
     # Compute metrics per guidance scale
-    for scale_idx, guidance_scale in enumerate(used_guidance_scales):
+    for scale_idx, guidance_scale in enumerate(guidance_scales):
         per_class_metrics = {i: {} for i in range(num_classes)}
 
         # Compute metrics per class for this guidance scale
