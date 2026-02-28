@@ -1,6 +1,7 @@
 from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn as nn
 from torchvision import datasets, transforms
@@ -9,7 +10,6 @@ from whar_datasets import (
     Loader,
     PostProcessingPipeline,
     PreProcessingPipeline,
-    TorchAdapter,
     WHARDatasetID,
     get_dataset_cfg,
 )
@@ -68,7 +68,6 @@ class DataSampler(nn.Module, Sampleable):
         dataset: str = "wisdm",
         seed: int = 42,
         window_time: float = 6.0,
-        split_type: str = "train",
     ):
         super().__init__()
         # create cfg for dataset
@@ -82,96 +81,70 @@ class DataSampler(nn.Module, Sampleable):
         pre_pipeline = PreProcessingPipeline(cfg)
         activity_df, session_df, window_df = pre_pipeline.run()
 
-        # create LOSO splits
+        # create KFOLD splits
         splitter = KFoldSplitter(cfg)
         splits = splitter.get_splits(session_df, window_df)
-        split = splits[0]
+        self.split = splits[0]
 
         # create and run post-processing pipeline for the specific split
         post_pipeline = PostProcessingPipeline(
-            cfg, pre_pipeline, window_df, split.train_indices
+            cfg, pre_pipeline, window_df, self.split.train_indices
         )
         samples = post_pipeline.run()
 
         # create dataloaders for the specific split
-        loader = Loader(session_df, window_df, post_pipeline.samples_dir, samples)
-        adapter = TorchAdapter(cfg, loader, split)
-        dataloaders = adapter.get_dataloaders(batch_size=64)
-        self.train_dataloader = dataloaders["train"]
-        self.val_dataloader = dataloaders["val"]
+        self.loader = Loader(session_df, window_df, post_pipeline.samples_dir, samples)
         self.dummy = nn.Buffer(
             torch.zeros(1)
         )  # Will automatically be moved when self.to(...) is called
+        self.seed = seed
 
     def sample(
         self,
         num_samples: int,
-        dataloader: str = "train",
+        subset: str = "train",
         class_idx: Optional[int] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Args:
             - num_samples: the desired number of samples
-            - dataloader: which dataloader to sample from ("train" or "val")
+            - subset: which set to sample from ("train", "val", or "test")
             - class_idx: if provided, only sample from this class (1-6 for WISDM, where 0 is unconditional)
         Returns:
             - samples: shape (batch_size, channels, signal_length)
             - labels: shape (batch_size, label_dim) with values 1-6 (0 reserved for unconditional)
         """
-        samples_list = []
-        labels_list = []
-
-        if dataloader == "train":
-            dl = self.train_dataloader
-        elif dataloader == "val":
-            dl = self.val_dataloader
+        if subset == "train":
+            indices = self.split.train_indices
+        elif subset == "val":
+            indices = self.split.val_indices
+        elif subset == "test":
+            indices = self.split.test_indices
         else:
-            raise ValueError(f"Unknown dataloader: {dataloader}")
+            raise ValueError(f"Invalid subset: {subset}")
+        activity_labels, _, samples = self.loader.sample_items(
+            num_samples, indices=indices, activity_id=class_idx - 1, seed=self.seed
+        )
+        activity_labels = map(lambda x: x + 1, activity_labels)  # shift to 1-6
 
-        for batch_labels, batch_samples in dl:
-            # Filter by class if class_idx is specified
-            if class_idx is not None:
-                # batch_labels shape: (batch_size,) or (batch_size, 1)
-                mask = batch_labels.squeeze() == (
-                    class_idx - 1
-                )  # Adjust for 0-based indexing
-                batch_samples = batch_samples[mask]
-                batch_labels = batch_labels[mask]
+        # Convert to tensors of appropriate shape
+        samples = torch.tensor(
+            np.array(samples), dtype=torch.float32, device=self.dummy.device
+        )  # (batch_size, 1, signal_length, channels)
+        samples = samples.squeeze(1).permute(
+            0, 2, 1
+        )  # (batch_size, signal_length, channels)
 
-            if batch_samples.shape[0] == 0:
-                continue  # Skip empty batches
+        activity_labels = torch.tensor(
+            list(activity_labels), dtype=torch.int64, device=self.dummy.device
+        ).unsqueeze(1)  # shape (batch_size, 1)
 
-            samples_list.append(batch_samples)
-            labels_list.append(batch_labels)
-
-            total_samples = sum(s.shape[0] for s in samples_list)
-            if total_samples >= num_samples:
-                break
-
-        if len(samples_list) == 0:
-            raise ValueError(
-                f"No samples found for class {class_idx} in {dataloader} set"
-            )
-
-        # Concatenate and slice to exact number
-        samples = torch.cat(samples_list, dim=0)[:num_samples].to(self.dummy.device)
-        labels = torch.cat(labels_list, dim=0)[:num_samples].to(self.dummy.device)
-
-        # Add 1 to labels to reserve 0 for unconditional generation
-        labels = labels + 1
-
-        # Permute samples to have shape (num_samples, channels, signal_length)
-        samples = samples.permute(0, 2, 1)
-
-        # Extend labels to have shape (num_samples, label_dim)
-        if labels.dim() == 1:
-            labels = labels.unsqueeze(1)
-
-        return samples, labels
+        return samples, activity_labels
 
 
-# samples, labels = DataSampler(dataset="wisdm").sample(10, "val")
-# print(f"Samples data: {samples}, Labels data: {labels}")
+samples, labels = DataSampler(dataset="wisdm").sample(10, "train", class_idx=3)
+print(f"Samples shape: {samples.size()}")
+print(f"Labels shape: {labels.size()}")
 
 
 def visualize_wisdm_samples(
@@ -188,12 +161,12 @@ def visualize_wisdm_samples(
 
     # Activity mapping (adjust based on your dataset's activity classes)
     activity_names = {
-        0: "Walking",
-        1: "Jogging",
-        2: "Upstairs",
-        3: "Downstairs",
-        4: "Sitting",
-        5: "Standing",
+        1: "Walking",
+        2: "Jogging",
+        3: "Upstairs",
+        4: "Downstairs",
+        5: "Sitting",
+        6: "Standing",
     }
 
     num_plots = min(num_plots, samples.shape[0])
@@ -235,4 +208,4 @@ def visualize_wisdm_samples(
     plt.show()
 
 
-# visualize_wisdm_samples(samples, labels, num_plots=4)
+visualize_wisdm_samples(samples, labels, num_plots=4)

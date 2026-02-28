@@ -1,6 +1,7 @@
 from abc import ABC
 from typing import List
 
+import matplotlib.pyplot as plt
 import torch
 
 from diffusion_models.architectures.blocks.base import Conditioner
@@ -133,3 +134,107 @@ class UNet(ConditionalVectorField, ABC):
         x1 = simulator.simulate(x0, ts, y=class_labels)
 
         return x1
+
+    @torch.no_grad()
+    def visualize(
+        self,
+        num_samples: int,
+        p_data_shape: List[int],
+        class_idx: int | None = None,
+        num_timesteps: int = 30,
+        guidance_scale: float = 1.0,
+        class_names: List[str] | None = None,
+        save_path: str | None = None,
+        device: torch.device = None,
+    ) -> torch.Tensor:
+        """
+        Sample from the diffusion model and visualize the results.
+
+        Args:
+            - num_samples: Number of samples to generate
+            - p_data_shape: Shape of the data to generate (channels, length)
+            - class_idx: Class index for conditional generation (None uses null class)
+            - num_timesteps: Number of timesteps for ODE simulation
+            - guidance_scale: Classifier-free guidance scale (1.0 = no guidance)
+            - class_names: Optional list of class names for title
+            - save_path: Optional path to save the figure
+            - device: Device to run on
+
+        Returns:
+            - Generated samples, shape (num_samples, *p_data_shape)
+        """
+        # Generate samples
+        samples = self.sample(
+            num_samples=num_samples,
+            p_data_shape=p_data_shape,
+            class_idx=class_idx,
+            num_timesteps=num_timesteps,
+            guidance_scale=guidance_scale,
+            device=device,
+        )
+
+        # Move to CPU for visualization
+        samples_cpu = samples.cpu().numpy()
+
+        # Determine grid size
+        num_channels = p_data_shape[0]
+        num_cols = min(num_samples, 4)
+        num_rows = (num_samples + num_cols - 1) // num_cols
+
+        # Create figure
+        fig, axes = plt.subplots(
+            num_rows, num_cols, figsize=(4 * num_cols, 3 * num_rows), squeeze=False
+        )
+
+        # Get class name for title
+        if class_names and class_idx is not None and class_idx > 0:
+            class_name = class_names[
+                class_idx - 1
+            ]  # Adjust for 0-indexed unconditional
+        elif class_idx == 0 or class_idx is None:
+            class_name = "Unconditional"
+        else:
+            class_name = f"Class {class_idx}"
+
+        # Plot each sample
+        for idx in range(num_samples):
+            row = idx // num_cols
+            col = idx % num_cols
+            ax = axes[row, col]
+
+            sample = samples_cpu[idx]  # (channels, length)
+
+            # Plot each channel
+            for ch in range(num_channels):
+                ax.plot(sample[ch], label=f"Channel {ch}", alpha=0.7)
+
+            ax.set_title(f"Sample {idx + 1}", fontsize=10)
+            ax.set_xlabel("Time")
+            ax.set_ylabel("Value")
+            ax.grid(True, alpha=0.3)
+            if num_channels <= 5:  # Only show legend if not too many channels
+                ax.legend(fontsize=8)
+
+        # Hide empty subplots
+        for idx in range(num_samples, num_rows * num_cols):
+            row = idx // num_cols
+            col = idx % num_cols
+            axes[row, col].axis("off")
+
+        fig.suptitle(
+            f"Generated Samples - {class_name} (guidance={guidance_scale})",
+            fontsize=14,
+            fontweight="bold",
+        )
+        plt.tight_layout()
+
+        # Save or show
+        if save_path:
+            plt.savefig(save_path, dpi=150, bbox_inches="tight")
+            print(f"Figure saved to {save_path}")
+        else:
+            plt.show()
+
+        plt.close()
+
+        return samples

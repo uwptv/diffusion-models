@@ -378,8 +378,11 @@ class HAEncoder(nn.Module):
             x = block(x, cond=cond_embed)
 
         # Merge batch and channels for convolution
-        x = x.permute(0, 1, 3, 2).reshape(
-            bs * c, feat_dim, seq_len
+        # x = x.permute(0, 1, 3, 2).reshape(
+        #     bs * c, feat_dim, seq_len
+        # )  # (bs * channels, features_in, L)
+        x = x.reshape(bs * c, seq_len, feat_dim).permute(
+            0, 2, 1
         )  # (bs * channels, features_in, L)
 
         # Conv: (bs * channels, features_in, L) -> (bs * channels, features_out, L // 2)

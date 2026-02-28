@@ -48,8 +48,8 @@ def objective(trial: optuna.Trial) -> float:
     )
 
     # Create training and validation samplers
-    train_sampler = DataSampler(dataset="wisdm", split_type="train")
-    val_sampler = DataSampler(dataset="wisdm", split_type="val")
+    train_sampler = DataSampler(dataset="wisdm", split_type="train").to(device)
+    val_sampler = DataSampler(dataset="wisdm", split_type="val").to(device)
 
     stopper = EarlyStopping(patience=50)
     trainer = CFGTrainer(
@@ -105,9 +105,6 @@ def objective(trial: optuna.Trial) -> float:
             }
         )
 
-        # Reset the generator to ensure identical data sampling across trials for fair comparison
-        path.p_data.reset_generator()
-
         # Train and get validation loss
         try:
             run_id, val_loss = trainer.train(
@@ -156,8 +153,6 @@ if __name__ == "__main__":
 
     mlflow.set_experiment("best_models_retrained")
 
-    path.p_data.reset_generator()  # Reset generator before retraining best model
-
     with mlflow.start_run(run_name="standard_unet_wisdm") as run:
         run_id = run.info.run_id
 
@@ -175,8 +170,8 @@ if __name__ == "__main__":
         )
 
         # Create training and validation samplers
-        train_sampler = DataSampler(dataset="wisdm", split_type="train")
-        val_sampler = DataSampler(dataset="wisdm", split_type="val")
+        train_sampler = DataSampler(dataset="wisdm", split_type="train").to(device)
+        val_sampler = DataSampler(dataset="wisdm", split_type="val").to(device)
 
         trainer = CFGTrainer(
             path=path,
@@ -218,7 +213,7 @@ if __name__ == "__main__":
                 generated_per_scale = [
                     model.sample(
                         10000,
-                        p_data_shape=[3, 128],
+                        p_data_shape=[3, 120],
                         class_idx=class_idx,
                         guidance_scale=guidance_scale,
                     )
