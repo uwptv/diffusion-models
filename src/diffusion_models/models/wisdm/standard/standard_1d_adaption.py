@@ -1,4 +1,5 @@
 import mlflow
+import numpy as np
 import optuna
 import torch
 from optuna.pruners import MedianPruner
@@ -47,19 +48,12 @@ def objective(trial: optuna.Trial) -> float:
         cond_dim=cond_dim,
     )
 
-    # Create training and validation samplers
-    train_sampler = DataSampler(dataset="wisdm", split_type="train").to(device)
-    val_sampler = DataSampler(dataset="wisdm", split_type="val").to(device)
-
-    stopper = EarlyStopping(patience=50)
     trainer = CFGTrainer(
         path=path,
         model=net,
         eta=eta,
         trial=trial,
-        stopper=stopper,
-        train_sampler=train_sampler,
-        val_sampler=val_sampler,
+        stopper=EarlyStopping(patience=50),
     )
 
     # Skip models that are too large to train
@@ -133,6 +127,7 @@ def objective(trial: optuna.Trial) -> float:
 if __name__ == "__main__":
     # Set seeds for reproducibility
     torch.manual_seed(42)
+    np.random.seed(42)
 
     mlflow.set_experiment("standard_unet_wisdm")
 
@@ -168,18 +163,11 @@ if __name__ == "__main__":
             num_classes=6,
             cond_dim=study.best_params["cond_dim"],
         )
-
-        # Create training and validation samplers
-        train_sampler = DataSampler(dataset="wisdm", split_type="train").to(device)
-        val_sampler = DataSampler(dataset="wisdm", split_type="val").to(device)
-
         trainer = CFGTrainer(
             path=path,
             model=model,
             eta=study.best_params["label_dropout_rate"],
             stopper=EarlyStopping(patience=50),
-            train_sampler=train_sampler,
-            val_sampler=val_sampler,
         )
         _, val_loss = trainer.train(
             num_epochs=1000,

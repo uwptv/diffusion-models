@@ -122,9 +122,19 @@ class DataSampler(nn.Module, Sampleable):
             indices = self.split.test_indices
         else:
             raise ValueError(f"Invalid subset: {subset}")
-        activity_labels, _, samples = self.loader.sample_items(
-            num_samples, indices=indices, activity_id=class_idx - 1, seed=self.seed
-        )
+
+        if class_idx is not None and (class_idx < 1 or class_idx > 6):
+            activity_labels, _, samples = self.loader.sample_items(
+                num_samples, indices=indices, activity_id=class_idx - 1, seed=self.seed
+            )
+        elif class_idx is not None:
+            raise ValueError(
+                f"Invalid class_idx: {class_idx}. Must be between 1 and 6."
+            )
+        else:
+            activity_labels, _, samples = self.loader.sample_items(
+                num_samples, indices=indices, seed=self.seed
+            )
         activity_labels = map(lambda x: x + 1, activity_labels)  # shift to 1-6
 
         # Convert to tensors of appropriate shape
@@ -142,9 +152,9 @@ class DataSampler(nn.Module, Sampleable):
         return samples, activity_labels
 
 
-samples, labels = DataSampler(dataset="wisdm").sample(10, "train", class_idx=3)
-print(f"Samples shape: {samples.size()}")
-print(f"Labels shape: {labels.size()}")
+# samples, labels = DataSampler(dataset="wisdm").sample(10, "train", class_idx=3)
+# print(f"Samples shape: {samples.size()}")
+# print(f"Labels shape: {labels.size()}")
 
 
 def visualize_wisdm_samples(
@@ -208,4 +218,4 @@ def visualize_wisdm_samples(
     plt.show()
 
 
-visualize_wisdm_samples(samples, labels, num_plots=4)
+# visualize_wisdm_samples(samples, labels, num_plots=4)

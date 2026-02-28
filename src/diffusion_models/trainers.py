@@ -133,25 +133,15 @@ class CFGTrainer(Trainer):
         path: GaussianConditionalProbabilityPath,
         model: ConditionalVectorField,
         eta: float,
-        train_sampler=None,
-        val_sampler=None,
         **kwargs,
     ):
         assert eta > 0 and eta < 1
         super().__init__(model, **kwargs)
         self.eta = eta
         self.path = path
-        self.train_sampler = train_sampler
-        self.val_sampler = val_sampler
 
-    def _sample_batch(self, batch_size: int, sampler=None):
-        """Sample a batch of data for flow matching from the specified sampler."""
-        if sampler is not None:
-            # Use external sampler (e.g., WISDM data)
-            z, y = sampler.sample(batch_size)
-        else:
-            # Fall back to synthetic data from self.path
-            z, y = self.path.sample_conditioning_variable(batch_size)
+    def _sample_batch(self, batch_size: int, subset: str = "train"):
+        z, y = self.path.sample_conditioning_variable(batch_size, subset=subset)
 
         mask = torch.rand(batch_size) < self.eta
         y[mask] = 0
@@ -163,12 +153,12 @@ class CFGTrainer(Trainer):
         return x, t, y, u_t
 
     def get_training_loss(self, batch_size: int) -> torch.Tensor:
-        x, t, y, u_t = self._sample_batch(batch_size, sampler=self.train_sampler)
+        x, t, y, u_t = self._sample_batch(batch_size, subset="train")
         u_t_theta = self.model(x, t, y)
         return torch.mean((u_t - u_t_theta) ** 2)
 
     def get_validation_loss(self, batch_size: int) -> torch.Tensor:
-        x, t, y, u_t = self._sample_batch(batch_size, sampler=self.val_sampler)
+        x, t, y, u_t = self._sample_batch(batch_size, subset="val")
         with torch.no_grad():
             u_t_theta = self.model(x, t, y)
         return torch.mean((u_t - u_t_theta) ** 2)

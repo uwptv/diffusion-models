@@ -114,6 +114,7 @@ class WaveSampler(nn.Module, Sampleable):
         mean: float = 1.0,
         std: float = 0.5,
         class_idx: int | None = None,
+        subset: str | None = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
@@ -121,6 +122,7 @@ class WaveSampler(nn.Module, Sampleable):
             - mean: mean of normal distribution for frequencies
             - std: standard deviation of normal distribution for frequencies
             - class_idx: if specified, sample only from this class. If None, sample from all classes.
+            - subset: if specified, sample from this subset of data (e.g., "train", "val", "test"), not used in this synthetic sampler but included for compatibility with DataSampler interface
         Returns:
             - samples: (num_samples, 3, signal_length)
             - labels: (num_samples, 1) with class index repeated
