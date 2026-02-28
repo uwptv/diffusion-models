@@ -38,6 +38,8 @@ path = GaussianConditionalProbabilityPath(
     beta=LinearBeta(),
 ).to(device)
 
+seen_configs = set()
+
 
 def objective(trial: optuna.Trial) -> float:
     # Hyperparameter search space for model architecture
@@ -52,6 +54,23 @@ def objective(trial: optuna.Trial) -> float:
     # Hyperparameters for training
     eta = trial.suggest_categorical("label_dropout_rate", [0.1, 0.2])
     lr = trial.suggest_categorical("learning_rate", [1e-4, 5e-4, 1e-3])
+
+    # Get a hash of the hyperparameters to avoid retraining the same model multiple times
+    params_hash = hash(
+        (
+            initial_channels,
+            levels,
+            num_residual_layers,
+            cond_dim,
+            upsampling_method,
+            eta,
+            lr,
+        )
+    )
+
+    if params_hash in seen_configs:
+        raise optuna.TrialPruned("Already evaluated this configuration")
+    seen_configs.add(params_hash)
 
     # Reset seeds for reproducibility in each trial
     seed_everything()
@@ -147,7 +166,7 @@ if __name__ == "__main__":
     study = optuna.create_study(
         direction="minimize",
         pruner=MedianPruner(
-            n_startup_trials=20,
+            n_startup_trials=10,
             n_warmup_steps=50,
             interval_steps=10,
             n_min_trials=5,
@@ -192,11 +211,13 @@ if __name__ == "__main__":
             batch_size=BATCH_SIZE,
         )
         # Log the best model
-        mlflow.pytorch.log_model(model, name="best_standard_unet_wisdm", run_id=run_id)
+        model_info = mlflow.pytorch.log_model(
+            model, name="best_standard_unet_wisdm", run_id=run_id
+        )
 
         # Register the best model as an MLflow model version
-        mlflow.register_model(
-            model_uri=f"runs:/{run_id}/best_standard_unet_wisdm",
+        model_info = mlflow.register_model(
+            model_uri=model_info.model_uri,
             name="BestStandardUNetWISDM",
         )
 
