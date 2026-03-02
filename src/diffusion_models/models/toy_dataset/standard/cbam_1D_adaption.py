@@ -214,7 +214,11 @@ if __name__ == "__main__":
             batch_size=BATCH_SIZE,
         )
         # Log the best model
-        mlflow.pytorch.log_model(model, name="best_cbam_unet", run_id=run_id)
+        model_info = mlflow.pytorch.log_model(
+            model, name="best_cbam_unet", run_id=run_id
+        )
+
+        mlflow.register_model(model_info.model_uri, name="BestCBAMUNetToy")
 
         # Log final validation loss
         mlflow.log_metric("final_val_loss", val_loss, run_id=run_id)

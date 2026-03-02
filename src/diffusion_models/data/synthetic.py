@@ -3,7 +3,7 @@ from typing import List, Tuple
 import torch
 import torch.nn as nn
 
-from .base import Sampleable
+from diffusion_models.data.base import Sampleable
 
 
 class SineWaveSampler(nn.Module, Sampleable):
@@ -111,8 +111,8 @@ class WaveSampler(nn.Module, Sampleable):
     def sample(
         self,
         num_samples: int,
-        mean: float = 1.0,
-        std: float = 0.5,
+        mean: float = 4.0,
+        std: float = 2.0,
         class_idx: int | None = None,
         subset: str | None = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -140,11 +140,14 @@ class WaveSampler(nn.Module, Sampleable):
 
         # If class_idx specified, use it for all samples; otherwise sample randomly
         if class_idx is not None:
-            assert 1 <= class_idx <= num_data_classes, (
-                f"class_idx must be in [1, {num_data_classes}]"
+            assert 0 <= class_idx <= num_data_classes - 1, (
+                f"class_idx must be in [0, {num_data_classes - 1}]"
             )
             class_indices = torch.full(
-                (num_samples,), class_idx, device=self.dummy.device, dtype=torch.long
+                (num_samples,),
+                class_idx + 1,
+                device=self.dummy.device,
+                dtype=torch.long,
             )
         else:
             class_indices = torch.randint(
@@ -166,12 +169,32 @@ class WaveSampler(nn.Module, Sampleable):
         freqs = frequencies.unsqueeze(1)
 
         sine_waves = amps * torch.sin(2 * torch.pi * freqs * t + self.phase)
+        # generate gaussian noise and add to all waves
+        noise = torch.randn_like(sine_waves) * 0.3
         sawtooth_waves = amps * (2 * (freqs * t - torch.floor(0.5 + freqs * t)))
         square_waves = amps * torch.sign(
             torch.sin(2 * torch.pi * freqs * t + self.phase)
         )
+        sine_waves = sine_waves + noise
+        sawtooth_waves = sawtooth_waves + noise
+        square_waves = square_waves + noise
 
         waves = torch.stack([sine_waves, sawtooth_waves, square_waves], dim=1)
         labels = class_indices.unsqueeze(1)
 
         return waves, labels
+
+
+if __name__ == "__main__":
+    sampler = WaveSampler()
+    samples, labels = sampler.sample(num_samples=10, class_idx=2)
+    from matplotlib import pyplot as plt
+
+    plt.figure(figsize=(10, 5))
+    for j in range(10):
+        for i in range(3):
+            plt.subplot(3, 1, i + 1)
+            plt.plot(samples[j, i].cpu().detach().numpy())
+            plt.title(f"Wave {i + 1}")
+        plt.tight_layout()
+        plt.show()

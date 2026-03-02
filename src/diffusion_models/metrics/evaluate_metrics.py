@@ -37,7 +37,7 @@ def compute_all_metrics(
 
         # Sample real data once for all guidance scales
         real_data_all_classes = []
-        for class_idx in range(6):  # 6 classes in WISDM dataset
+        for class_idx in range(num_classes):
             real_sensor_data, _ = path.p_data.sample(10000, class_idx=class_idx)
             real_data_all_classes.append(real_sensor_data)
 
@@ -49,11 +49,11 @@ def compute_all_metrics(
             generated_per_scale = [
                 model.sample(
                     10000,
-                    p_data_shape=[3, 120],
+                    p_data_shape=path.p_simple_shape,
                     class_idx=class_idx,
                     guidance_scale=guidance_scale,
                 )
-                for class_idx in range(6)
+                for class_idx in range(num_classes)
             ]
             guidance_generated_data.append(generated_per_scale)
 

@@ -74,6 +74,8 @@ class DataSampler(nn.Module, Sampleable):
         dataset_id = WHARDatasetID(dataset)
         cfg = get_dataset_cfg(dataset_id)
         # cfg.parallelize = True
+        # if dataset_id == WHARDatasetID.UCI_HAR:
+        #     cfg.sensor_channels = ["body_acc_x", "body_acc_y", "body_acc_z"]
         cfg.window_time = window_time
         cfg.seed = seed
 

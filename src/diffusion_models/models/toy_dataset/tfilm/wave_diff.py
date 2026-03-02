@@ -167,7 +167,7 @@ def objective(trial: optuna.Trial) -> float:
 
 
 if __name__ == "__main__":
-    mlflow.set_experiment("standard_unet")
+    mlflow.set_experiment("tfilm_unet")
 
     study = optuna.create_study(
         direction="minimize",
@@ -186,7 +186,7 @@ if __name__ == "__main__":
 
     mlflow.set_experiment("best_models_retrained")
 
-    with mlflow.start_run(run_name="standard_unet") as run:
+    with mlflow.start_run(run_name="best_tfilm_unet") as run:
         run_id = run.info.run_id
 
         mlflow.log_params(study.best_params, run_id=run_id)

@@ -233,6 +233,7 @@ class UNet(ConditionalVectorField, ABC):
         if save_path:
             plt.savefig(save_path, dpi=150, bbox_inches="tight")
             print(f"Figure saved to {save_path}")
+            plt.show()
         else:
             plt.show()
 

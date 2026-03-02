@@ -100,6 +100,7 @@ class GaussianConditionalProbabilityPath(ConditionalProbabilityPath):
         super().__init__(p_simple, p_data)
         self.alpha = alpha
         self.beta = beta
+        self.p_simple_shape = p_simple_shape
 
     def sample_conditional_path(self, z: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
