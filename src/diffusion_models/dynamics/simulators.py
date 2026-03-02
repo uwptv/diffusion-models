@@ -5,6 +5,7 @@ from tqdm import tqdm
 
 from .base import ODE, SDE
 
+
 class Simulator(ABC):
     @abstractmethod
     def step(self, xt: torch.Tensor, t: torch.Tensor, dt: torch.Tensor, **kwargs):
@@ -49,22 +50,30 @@ class Simulator(ABC):
         xs = [x.clone()]
         nts = ts.shape[1]
         for t_idx in tqdm(range(nts - 1)):
-            t = ts[:,t_idx]
+            t = ts[:, t_idx]
             h = ts[:, t_idx + 1] - ts[:, t_idx]
             x = self.step(x, t, h, **kwargs)
             xs.append(x.clone())
         return torch.stack(xs, dim=1)
 
+
 class EulerSimulator(Simulator):
     def __init__(self, ode: ODE):
         self.ode = ode
-        
+
     def step(self, xt: torch.Tensor, t: torch.Tensor, h: torch.Tensor, **kwargs):
-        return xt + self.ode.drift_coefficient(xt,t, **kwargs) * h
+        return xt + self.ode.drift_coefficient(xt, t, **kwargs) * h
+
 
 class EulerMaruyamaSimulator(Simulator):
     def __init__(self, sde: SDE):
         self.sde = sde
-        
+
     def step(self, xt: torch.Tensor, t: torch.Tensor, h: torch.Tensor, **kwargs):
-        return xt + self.sde.drift_coefficient(xt,t, **kwargs) * h + self.sde.diffusion_coefficient(xt,t, **kwargs) * torch.sqrt(h) * torch.randn_like(xt)
+        return (
+            xt
+            + self.sde.drift_coefficient(xt, t, **kwargs) * h
+            + self.sde.diffusion_coefficient(xt, t, **kwargs)
+            * torch.sqrt(h)
+            * torch.randn_like(xt)
+        )

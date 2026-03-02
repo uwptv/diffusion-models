@@ -102,7 +102,9 @@ class GaussianConditionalProbabilityPath(ConditionalProbabilityPath):
         self.beta = beta
         self.p_simple_shape = p_simple_shape
 
-    def sample_conditional_path(self, z: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def sample_conditional_path(
+        self, z: torch.Tensor, t: torch.Tensor, generator: torch.Generator | None = None
+    ) -> torch.Tensor:
         """
         Samples from the conditional distribution p_t(x|z)
         Args:
@@ -111,7 +113,10 @@ class GaussianConditionalProbabilityPath(ConditionalProbabilityPath):
         Returns:
             - x: samples from p_t(x|z), (num_samples, c, ...)
         """
-        return self.alpha(t) * z + self.beta(t) * torch.randn_like(z)
+        mean = self.alpha(t) * z
+        std = self.beta(t)
+        noise = torch.randn(z.shape, device=z.device, generator=generator)
+        return mean + std * noise
 
     def conditional_vector_field(
         self, x: torch.Tensor, z: torch.Tensor, t: torch.Tensor

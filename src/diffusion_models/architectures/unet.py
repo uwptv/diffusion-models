@@ -44,12 +44,11 @@ class UNet(ConditionalVectorField, ABC):
         # Ensure all required components are initialized
         self._assert_initialized()
 
-        # Squeeze t to (bs,)
-        while t.ndim > 1:
-            t = t.squeeze(-1)
+        # Safely flatten t to (bs,) — squeeze is unsafe when bs=1
+        t = t.view(x.shape[0])
 
-        # Squeeze y to (bs,)
-        y = y.squeeze(-1)
+        # Safely flatten y to (bs,)
+        y = y.view(x.shape[0])
 
         # Create the conditioning embedding
         cond = self.conditioner(t, y)  # (bs, cond_dim)
@@ -159,9 +158,7 @@ class UNet(ConditionalVectorField, ABC):
             - dict mapping (class_idx, guidance_scale) -> generated sample tensor
         """
         if class_idx is None:
-            class_indices = list(
-                range(self.num_classes - 1)
-            )  # external indexing: 0..K-1
+            class_indices = list(range(self.num_classes))  # external indexing: 0..K-1
         else:
             class_indices = [class_idx]
 

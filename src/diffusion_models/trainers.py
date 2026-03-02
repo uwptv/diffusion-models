@@ -49,11 +49,16 @@ class Trainer(ABC):
         model: nn.Module,
         stopper: EarlyStopping,
         trial: optuna.Trial | None = None,
+        seed: int | None = None,
     ):
         super().__init__()
         self.model = model
         self.trial = trial
         self.stopper = stopper
+        self._seed = seed
+        self._gen = torch.Generator()
+        if self._seed is not None:
+            self._gen.manual_seed(self._seed)
 
     @abstractmethod
     def get_training_loss(self, **kwargs) -> torch.Tensor:
@@ -62,6 +67,11 @@ class Trainer(ABC):
     @abstractmethod
     def get_validation_loss(self, **kwargs) -> torch.Tensor:
         pass
+
+    def _reset_generator(self, device: torch.device):
+        self._gen = torch.Generator(device=device)
+        if self._seed is not None:
+            self._gen.manual_seed(self._seed)
 
     def get_optimizer(self, lr: float):
         return torch.optim.Adam(self.model.parameters(), lr=lr)
@@ -80,6 +90,9 @@ class Trainer(ABC):
 
         # Initialize smooth logger for validation loss
         smooth_logger = SmoothLogger(window_size=5)
+
+        # Reset generator for reproducibility of training dynamics and metrics
+        self._reset_generator(device)
 
         pbar = tqdm(enumerate(range(num_epochs)))
         for idx, _ in pbar:
@@ -133,21 +146,24 @@ class CFGTrainer(Trainer):
         path: GaussianConditionalProbabilityPath,
         model: ConditionalVectorField,
         eta: float,
+        seed: int = 42,
         **kwargs,
     ):
         assert eta > 0 and eta < 1
-        super().__init__(model, **kwargs)
+        super().__init__(model, seed=seed, **kwargs)
         self.eta = eta
         self.path = path
 
     def _sample_batch(self, batch_size: int, subset: str = "train"):
         z, y = self.path.sample_conditioning_variable(batch_size, subset=subset)
 
-        mask = torch.rand(batch_size) < self.eta
+        mask = torch.rand(batch_size, device=z.device, generator=self._gen) < self.eta
         y[mask] = 0
 
-        t = torch.rand((batch_size,) + (1,) * (z.ndim - 1)).to(z.device)
-        x = self.path.sample_conditional_path(z, t)
+        t = torch.rand(
+            (batch_size,) + (1,) * (z.ndim - 1), generator=self._gen, device=z.device
+        )
+        x = self.path.sample_conditional_path(z, t, generator=self._gen)
         u_t = self.path.conditional_vector_field(x, z, t)
 
         return x, t, y, u_t
