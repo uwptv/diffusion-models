@@ -3,8 +3,8 @@ import optuna
 import torch
 from optuna.pruners import MedianPruner
 
-from diffusion_models.architectures.tfilm_unet import TFiLMUNet
-from diffusion_models.data.synthetic import WaveSampler
+from diffusion_models.architectures.tunet import TUNet
+from diffusion_models.data.loaders import DataSampler
 from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath
 from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
 from diffusion_models.metrics.evaluate_metrics import compute_all_metrics
@@ -19,17 +19,9 @@ from diffusion_models.utils.sizes import (
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Initialize probability path
-path = GaussianConditionalProbabilityPath(
-    p_data=WaveSampler(),
-    p_simple_shape=[3, 128],
-    alpha=LinearAlpha(),
-    beta=LinearBeta(),
-).to(device)
-
 # Set training depending constants
-NUM_CLASSES = 3
-USE_TOY = True
+NUM_CLASSES = 6
+USE_TOY = False
 
 # Set global constants
 SEED = 42
@@ -37,6 +29,14 @@ MAX_MODEL_SIZE = 20
 MAX_GFLOPS = 1
 BATCH_SIZE = 128
 MAX_NUM_EPOCHS = 1000
+
+# Initialize probability path
+path = GaussianConditionalProbabilityPath(
+    p_data=DataSampler(),
+    p_simple_shape=[3, 120],
+    alpha=LinearAlpha(),
+    beta=LinearBeta(),
+).to(device)
 
 seen_configs = set()
 
@@ -53,6 +53,9 @@ def objective(trial: optuna.Trial) -> float:
     num_tfilm_blocks = trial.suggest_categorical("num_tfilm_blocks", [2, 4, 8, 16])
     hidden_size_rnn = trial.suggest_categorical("hidden_size_rnn", [32, 64, 128])
     num_layers_rnn = trial.suggest_int("num_layers_rnn", 1, 3)
+    num_heads = trial.suggest_categorical("num_heads", [2, 4, 8])
+    num_transformer_layers = trial.suggest_int("num_transformer_layers", 1, 3)
+    ffn_expansion_factor = trial.suggest_categorical("ffn_expansion_factor", [2, 4, 8])
 
     # Hyperparameters for training
     eta = trial.suggest_categorical("label_dropout_rate", [0.1, 0.2])
@@ -66,9 +69,6 @@ def objective(trial: optuna.Trial) -> float:
             num_residual_layers,
             cond_dim,
             upsampling_method,
-            num_tfilm_blocks,
-            hidden_size_rnn,
-            num_layers_rnn,
             eta,
             lr,
         )
@@ -78,10 +78,11 @@ def objective(trial: optuna.Trial) -> float:
         raise optuna.TrialPruned("Already evaluated this configuration")
     seen_configs.add(params_hash)
 
+    # Reset seeds for reproducibility in each trial
     seed_everything()
 
     # Model & trainer
-    net = TFiLMUNet(
+    net = TUNet(
         input_channels=3,
         initial_channels=initial_channels,
         levels=levels,
@@ -92,6 +93,9 @@ def objective(trial: optuna.Trial) -> float:
         num_tfilm_blocks=num_tfilm_blocks,
         hidden_size_rnn=hidden_size_rnn,
         num_layers_rnn=num_layers_rnn,
+        num_heads=num_heads,
+        num_transformer_layers=num_transformer_layers,
+        ffn_expansion_factor=ffn_expansion_factor,
     )
     trainer = CFGTrainer(
         path=path, model=net, eta=eta, trial=trial, stopper=EarlyStopping(patience=50)
@@ -110,7 +114,7 @@ def objective(trial: optuna.Trial) -> float:
         raise optuna.TrialPruned(f"Model too large: {model_size: .3f}MiB")
 
     # Skip models that have too many GFLOPs for training
-    flops = count_flops(net, channels=3, seq_len=128)
+    flops = count_flops(net, channels=3, seq_len=120)
     giga_flops = flops / GigaFLOP
     if giga_flops > MAX_GFLOPS:
         with mlflow.start_run(
@@ -136,6 +140,9 @@ def objective(trial: optuna.Trial) -> float:
                 "num_tfilm_blocks": num_tfilm_blocks,
                 "hidden_size_rnn": hidden_size_rnn,
                 "num_layers_rnn": num_layers_rnn,
+                "num_heads": num_heads,
+                "num_transformer_layers": num_transformer_layers,
+                "ffn_expansion_factor": ffn_expansion_factor,
                 "label_dropout_rate": f"{eta:.2f}",
                 "learning_rate": f"{lr:.3}",
             }
@@ -167,7 +174,7 @@ def objective(trial: optuna.Trial) -> float:
 
 
 if __name__ == "__main__":
-    mlflow.set_experiment("standard_unet")
+    mlflow.set_experiment("standard_tunet_wisdm")
 
     study = optuna.create_study(
         direction="minimize",
@@ -195,7 +202,7 @@ if __name__ == "__main__":
         seed_everything()
 
         # Retrain best model on full training data and evaluate metrics
-        model = TFiLMUNet(
+        model = TUNet(
             input_channels=3,
             initial_channels=study.best_params["initial_channels"],
             levels=study.best_params["levels"],
@@ -206,6 +213,9 @@ if __name__ == "__main__":
             num_tfilm_blocks=study.best_params["num_tfilm_blocks"],
             hidden_size_rnn=study.best_params["hidden_size_rnn"],
             num_layers_rnn=study.best_params["num_layers_rnn"],
+            num_heads=study.best_params["num_heads"],
+            num_transformer_layers=study.best_params["num_transformer_layers"],
+            ffn_expansion_factor=study.best_params["ffn_expansion_factor"],
         )
         trainer = CFGTrainer(
             path=path,
@@ -220,14 +230,12 @@ if __name__ == "__main__":
             batch_size=BATCH_SIZE,
         )
         # Log the best model
-        model_info = mlflow.pytorch.log_model(
-            model, name="best_tfilm_unet", run_id=run_id
-        )
+        model_info = mlflow.pytorch.log_model(model, name="best_tunet", run_id=run_id)
 
         # Register the best model as an MLflow model version
         mlflow.register_model(
             model_uri=model_info.model_uri,
-            name="BestTFiLMUNetToy",
+            name="BestTUNetWISDM",
         )
 
         # Log final validation loss

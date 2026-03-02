@@ -14,38 +14,6 @@ from diffusion_models.architectures.blocks.base import (
 from diffusion_models.architectures.blocks.tfilm import TFiLM, TFiLMTransformer
 
 
-class Encoder(nn.Module):
-    def __init__(
-        self,
-        channels_in: int,
-        channels_out: int,
-        num_residual_layers: int,
-        cond_dim: int,
-    ):
-        super().__init__()
-        self.res_blocks = nn.ModuleList(
-            [ResidualLayer(channels_in, cond_dim) for _ in range(num_residual_layers)]
-        )
-        self.downsample = nn.Conv2d(
-            channels_in, channels_out, kernel_size=3, stride=2, padding=1
-        )
-
-    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-        - x: (bs, c_in, h, w)
-        - cond: (bs, cond_dim)
-        """
-        # Pass through residual blocks: (bs, c_in, h, w) -> (bs, c_in, h, w)
-        for block in self.res_blocks:
-            x = block(x, cond)
-
-        # Downsample: (bs, c_in, h, w) -> (bs, c_out, h // 2, w // 2)
-        x = self.downsample(x)
-
-        return x
-
-
 class Encoder1D(nn.Module):
     def __init__(
         self,

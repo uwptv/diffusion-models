@@ -9,9 +9,26 @@ from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityP
 from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
 from diffusion_models.metrics.evaluate_metrics import compute_all_metrics
 from diffusion_models.trainers import CFGTrainer, EarlyStopping
-from diffusion_models.utils.sizes import GigaFLOP, MiB, count_flops, model_size_b
+from diffusion_models.utils.sizes import (
+    GigaFLOP,
+    MiB,
+    count_flops,
+    model_size_b,
+    seed_everything,
+)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Set training depending constants
+NUM_CLASSES = 3
+USE_TOY = True
+
+# Set global constants
+SEED = 42
+MAX_MODEL_SIZE = 20
+MAX_GFLOPS = 1
+BATCH_SIZE = 128
+MAX_NUM_EPOCHS = 1000
 
 # Initialize probability path
 path = GaussianConditionalProbabilityPath(
@@ -20,6 +37,8 @@ path = GaussianConditionalProbabilityPath(
     alpha=LinearAlpha(),
     beta=LinearBeta(),
 ).to(device)
+
+seen_configs = set()
 
 
 def objective(trial: optuna.Trial) -> float:
@@ -38,6 +57,26 @@ def objective(trial: optuna.Trial) -> float:
     eta = trial.suggest_categorical("label_dropout_rate", [0.1, 0.2])
     lr = trial.suggest_categorical("learning_rate", [1e-4, 5e-4, 1e-3])
 
+    # Get a hash of the hyperparameters to avoid retraining the same model multiple times
+    params_hash = hash(
+        (
+            initial_channels,
+            levels,
+            num_residual_layers,
+            cond_dim,
+            upsampling_method,
+            eta,
+            lr,
+        )
+    )
+
+    if params_hash in seen_configs:
+        raise optuna.TrialPruned("Already evaluated this configuration")
+    seen_configs.add(params_hash)
+
+    # Reset seeds for reproducibility in each trial
+    seed_everything()
+
     # Model & trainer
     net = CBAMUNet(
         input_channels=3,
@@ -45,7 +84,7 @@ def objective(trial: optuna.Trial) -> float:
         levels=levels,
         upsampling_method=upsampling_method,
         num_residual_layers=num_residual_layers,
-        num_classes=3,
+        num_classes=NUM_CLASSES,
         cond_dim=cond_dim,
         cbam_reduction_ratio=cbam_reduction_ratio,
         cbam_kernel_size=cbam_kernel_size,
@@ -56,7 +95,6 @@ def objective(trial: optuna.Trial) -> float:
 
     # Skip models that are too large to train
     model_size = model_size_b(net) / MiB
-    MAX_MODEL_SIZE = 20
     if model_size > MAX_MODEL_SIZE:
         with mlflow.start_run(
             run_name=f"trial_{trial.number}_pruned_size", nested=True
@@ -70,8 +108,7 @@ def objective(trial: optuna.Trial) -> float:
     # Skip models that have too many GFLOPs for training
     flops = count_flops(net, channels=3, seq_len=128)
     giga_flops = flops / GigaFLOP
-    MAX_FLOPS = 1
-    if giga_flops > MAX_FLOPS:
+    if giga_flops > MAX_GFLOPS:
         with mlflow.start_run(
             run_name=f"trial_{trial.number}_pruned_flops", nested=True
         ):
@@ -99,16 +136,13 @@ def objective(trial: optuna.Trial) -> float:
             }
         )
 
-        # Reset the generator to ensure identical data sampling across trials for fair comparison
-        path.p_data.reset_generator()
-
         # Train and get validation loss
         try:
             run_id, val_loss = trainer.train(
-                num_epochs=1000,
+                num_epochs=MAX_NUM_EPOCHS,
                 device=device,
                 lr=lr,
-                batch_size=128,
+                batch_size=BATCH_SIZE,
             )
 
             mlflow.log_metric("val_loss", val_loss, run_id=run_id)
@@ -128,15 +162,12 @@ def objective(trial: optuna.Trial) -> float:
 
 
 if __name__ == "__main__":
-    # Set seeds for reproducibility
-    torch.manual_seed(42)
-
     mlflow.set_experiment("cbam_unet")
 
     study = optuna.create_study(
         direction="minimize",
         pruner=MedianPruner(
-            n_startup_trials=20,
+            n_startup_trials=10,
             n_warmup_steps=50,
             interval_steps=10,
             n_min_trials=5,
@@ -150,13 +181,13 @@ if __name__ == "__main__":
 
     mlflow.set_experiment("best_models_retrained")
 
-    # Reset generator before retraining best model
-    path.p_data.reset_generator()
-
     with mlflow.start_run(run_name="cbam_unet") as run:
         run_id = run.info.run_id
 
         mlflow.log_params(study.best_params, run_id=run_id)
+
+        # Set seeds for reproducibility
+        seed_everything()
 
         # Retrain best model on full training data and evaluate metrics
         model = CBAMUNet(
@@ -165,7 +196,7 @@ if __name__ == "__main__":
             levels=study.best_params["levels"],
             upsampling_method=study.best_params["upsampling_method"],
             num_residual_layers=study.best_params["num_residual_layers"],
-            num_classes=3,
+            num_classes=NUM_CLASSES,
             cond_dim=study.best_params["cond_dim"],
             cbam_reduction_ratio=study.best_params["cbam_reduction_ratio"],
             cbam_kernel_size=study.best_params["cbam_kernel_size"],
@@ -177,10 +208,10 @@ if __name__ == "__main__":
             stopper=EarlyStopping(patience=50),
         )
         _, val_loss = trainer.train(
-            num_epochs=1000,
+            num_epochs=MAX_NUM_EPOCHS,
             device=device,
             lr=study.best_params["learning_rate"],
-            batch_size=128,
+            batch_size=BATCH_SIZE,
         )
         # Log the best model
         mlflow.pytorch.log_model(model, name="best_cbam_unet", run_id=run_id)
@@ -188,41 +219,7 @@ if __name__ == "__main__":
         # Log final validation loss
         mlflow.log_metric("final_val_loss", val_loss, run_id=run_id)
 
-        # Generate samples for evaluation
-        with torch.no_grad():
-            guidance_scales = [2.0, 3.0, 4.0]
-            guidance_real_data = []
-            guidance_generated_data = []
-
-            # Sample real data once for all guidance scales
-            real_data_all_classes = []
-            for class_idx in range(1, 4):
-                real_sensor_data, _ = path.p_data.sample(10000, class_idx=class_idx)
-                real_data_all_classes.append(real_sensor_data)
-
-            # Append the real data for all classes as a single entry in the guidance_real_data list
-            guidance_real_data.append(real_data_all_classes)
-
-            # Generate samples for each guidance scale
-            for guidance_scale in guidance_scales:
-                generated_per_scale = [
-                    model.sample(
-                        10000,
-                        p_data_shape=[3, 128],
-                        class_idx=class_idx,
-                        guidance_scale=guidance_scale,
-                    )
-                    for class_idx in range(1, 4)
-                ]
-                guidance_generated_data.append(generated_per_scale)
-
-        # Compute metrics
-        metrics = compute_all_metrics(
-            real_data=guidance_real_data[0],
-            generated_data=guidance_generated_data,
-            used_guidance_scales=guidance_scales,
-            use_toy=True,
-        )
+        metrics = compute_all_metrics(model, path, NUM_CLASSES, [2.0, 4.0], USE_TOY)
 
         # Log metrics
         mlflow.log_metrics(metrics, run_id=run_id)

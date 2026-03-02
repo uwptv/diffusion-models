@@ -92,7 +92,7 @@ class CBAMDecoder(Decoder1D):
         x = self.activation(x)
 
         # Refine the upsampled features
-        x = self.cbam(x, cond_embed)
+        x = self.cbam(x)
         x = self.norm(x, cond_embed)
         x = self.activation(x)
 
@@ -398,23 +398,15 @@ class HADecoder(nn.Module):
         # Update feature dimension after upsampling
         _, feat_out, seq_len = x.shape
 
+        # Add temporal attention: (bs * channels, features_out, 2*L) -> (bs * channels, features_out, 2*L)
         x = self.temporal_attention(x, cond_embed.repeat_interleave(c, dim=0))
         # Reshape back
-        x = x.reshape(bs, c, feat_dim, 2 * seq_len).permute(
+        x = x.reshape(bs, c, feat_out, seq_len).permute(
             0, 1, 3, 2
         )  # (bs, channels, 2*L, features_out)
 
         # Cross-Channel Attention: (bs, channels, 2*L, features_out) -> (bs, channels, 2*L, features_out)
         x = self.cc_attention(x)
-
-        x = x.permute(0, 1, 3, 2).reshape(
-            bs * c, feat_dim, 2 * seq_len
-        )  # (bs * channels, features_out, 2*L)
-        # temporal attention: (bs * channels, features_out, 2*L) -> (bs * channels, features_out, 2*L)
-
-        x = x.reshape(bs, c, feat_dim, 2 * seq_len).permute(
-            0, 1, 3, 2
-        )  # (bs, channels, 2*L, features_out)
 
         # Pass through residual blocks: (bs, channels, 2*L, features_out) -> (bs, channels, 2*L, features_out)
         for block in self.res_blocks:

@@ -228,6 +228,9 @@ class CrossChannelAttention(nn.Module):
         super().__init__()
         self.num_channels = num_channels
         self.feature_dim = feature_dim
+        num_heads = min(
+            num_heads, feature_dim
+        )  # Ensure num_heads does not exceed feature_dim
         self.num_heads = num_heads
         self.num_layers = num_layers
 
