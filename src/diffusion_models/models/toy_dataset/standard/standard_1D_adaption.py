@@ -28,7 +28,7 @@ SEED = 42
 MAX_MODEL_SIZE = 20
 MAX_GFLOPS = 1
 BATCH_SIZE = 128
-MAX_NUM_EPOCHS = 2
+MAX_NUM_EPOCHS = 1000
 
 # Initialize probability path
 path = GaussianConditionalProbabilityPath(
@@ -78,15 +78,15 @@ def objective(trial: optuna.Trial) -> float:
     # Model & trainer
     net = StandardUNet(
         input_channels=3,
-        initial_channels=8,
-        levels=1,
-        upsampling_method="transposed",
-        num_residual_layers=1,
+        initial_channels=initial_channels,
+        levels=levels,
+        upsampling_method=upsampling_method,
+        num_residual_layers=num_residual_layers,
         num_classes=NUM_CLASSES,
-        cond_dim=48,
+        cond_dim=cond_dim,
     )
     stopper = EarlyStopping(patience=50)
-    trainer = CFGTrainer(path=path, model=net, eta=0.2, trial=trial, stopper=stopper)
+    trainer = CFGTrainer(path=path, model=net, eta=eta, trial=trial, stopper=stopper)
 
     # Skip models that are too large to train
     model_size = model_size_b(net) / MiB
@@ -137,7 +137,7 @@ def objective(trial: optuna.Trial) -> float:
             run_id, val_loss = trainer.train(
                 num_epochs=MAX_NUM_EPOCHS,
                 device=device,
-                lr=0.001,
+                lr=lr,
                 batch_size=BATCH_SIZE,
             )
 
@@ -169,7 +169,7 @@ if __name__ == "__main__":
             n_min_trials=5,
         ),
     )
-    study.optimize(objective, n_trials=5)
+    study.optimize(objective, n_trials=100)
 
     print("Best trial:", study.best_trial.number)
     print("Best value:", study.best_value)
@@ -201,6 +201,7 @@ if __name__ == "__main__":
             eta=study.best_params["label_dropout_rate"],
             stopper=EarlyStopping(patience=50),
         )
+
         # Reset generator for reproducibility of training dynamics and metrics
         path.p_data.reset_generator()
 

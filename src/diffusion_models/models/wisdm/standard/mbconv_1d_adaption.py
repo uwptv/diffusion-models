@@ -67,6 +67,9 @@ def objective(trial: optuna.Trial) -> float:
             num_residual_layers,
             cond_dim,
             upsampling_method,
+            num_mbconv_layers,
+            expansion_factor,
+            kernel_size,
             eta,
             lr,
         )

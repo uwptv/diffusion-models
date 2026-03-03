@@ -4,9 +4,9 @@ import torch
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # get model from mlflow
-model = mlflow.pytorch.load_model("models:/BestStandardUNetToy/6").to(device)
+model = mlflow.pytorch.load_model("models:/BestStandardUNetToy/11").to(device)
 
 model.visualize(
     p_data_shape=[3, 128],
-    save_path="plots/signals/standard_unet_toy_2.png",
+    save_path="plots/signals/standard_unet_toy.png",
 )

@@ -71,6 +71,10 @@ def objective(trial: optuna.Trial) -> float:
             num_residual_layers,
             cond_dim,
             upsampling_method,
+            num_tfilm_blocks,
+            num_transformer_heads,
+            num_transformer_layers,
+            ffn_dim_multiplier,
             eta,
             lr,
         )
