@@ -103,6 +103,7 @@ class Trainer(ABC):
 
             # Backprop on training loss and step optimizer
             train_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             opt.step()
 
             val_loss = self.get_validation_loss(**kwargs)
@@ -184,12 +185,10 @@ class TinyHARTrainer(Trainer):
     def __init__(
         self,
         model: nn.Module,
-        train_sampler,
-        val_sampler,
+        path: GaussianConditionalProbabilityPath,
     ):
         self.model = model
-        self.train_sampler = train_sampler
-        self.val_sampler = val_sampler
+        self.path = path
 
     def get_optimizer(self, lr: float):
         return torch.optim.Adam(self.model.parameters(), lr=lr)
@@ -216,14 +215,14 @@ class TinyHARTrainer(Trainer):
 
     def get_training_loss(self, batch_size: int) -> torch.Tensor:
         """Compute training loss from the training sampler."""
-        x, labels = self.train_sampler.sample(batch_size)
+        x, labels = self.path.sample_conditioning_variable(batch_size)
         labels = self._normalize_labels(labels)
         train_pred = self.model(x)
         return nn.CrossEntropyLoss()(train_pred, labels)
 
     def get_validation_loss(self, batch_size: int) -> torch.Tensor:
         """Compute validation loss from the validation sampler."""
-        x, labels = self.val_sampler.sample(batch_size)
+        x, labels = self.path.sample_conditioning_variable(batch_size)
         labels = self._normalize_labels(labels)
         with torch.no_grad():
             val_pred = self.model(x)
@@ -231,7 +230,7 @@ class TinyHARTrainer(Trainer):
 
     def _compute_predictions(self, num_samples: int, device: torch.device):
         """Helper to compute predictions and labels from validation set."""
-        x, labels = self.val_sampler.sample(num_samples)
+        x, labels = self.path.sample_conditioning_variable(num_samples)
         labels = self._normalize_labels(labels)
         x = x.to(device)
 
@@ -292,7 +291,7 @@ class TinyHARTrainer(Trainer):
         class_names: list[str] | None = None,
     ):
         """Train the TinyHAR classifier with MLflow logging."""
-        mlflow.set_experiment("TinyHAR_WISDM")
+        mlflow.set_experiment("TinyHAR")
 
         with mlflow.start_run(run_name=name):
             # Log hyperparameters
@@ -301,8 +300,6 @@ class TinyHARTrainer(Trainer):
             mlflow.log_param("num_epochs", num_epochs)
 
             self.model.to(device)
-            self.train_sampler.to(device)
-            self.val_sampler.to(device)
             opt = self.get_optimizer(lr)
 
             pbar = tqdm(range(num_epochs))

@@ -2,13 +2,19 @@ import torch
 
 from diffusion_models.architectures.tiny_har import TinyHAR
 from diffusion_models.data.loaders import DataSampler
+from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath
+from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
 from diffusion_models.trainers import TinyHARTrainer
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Create samplers
-train_sampler = DataSampler(dataset="wisdm", split_type="train")
-val_sampler = DataSampler(dataset="wisdm", split_type="val")
+# Create path
+path = GaussianConditionalProbabilityPath(
+    p_data=DataSampler(),
+    p_simple_shape=[3, 120],
+    alpha=LinearAlpha(),
+    beta=LinearBeta(),
+).to(device)
 
 # Create model
 model = TinyHAR(input_channels=3, window_size=120, num_classes=6)
@@ -16,8 +22,7 @@ model = TinyHAR(input_channels=3, window_size=120, num_classes=6)
 # Create trainer
 trainer = TinyHARTrainer(
     model=model,
-    train_sampler=train_sampler,
-    val_sampler=val_sampler,
+    path=path,
 )
 
 # Train
