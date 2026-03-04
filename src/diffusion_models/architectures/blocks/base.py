@@ -115,57 +115,61 @@ class Conditioner(nn.Module):
         return cond
 
 
-class ResidualLayer(nn.Module):
+class ResidualBlock(nn.Module):
     def __init__(
         self,
-        channels: int,
+        channels_in: int,
+        channels_out: int,
         cond_dim: int,
         activation: str = "silu",
-        use_1d: bool = True,
     ):
         super().__init__()
         self.activation = get_activation(activation)
 
-        # Choose convolution type
-        conv_cls = nn.Conv1d if use_1d else nn.Conv2d
+        self.conv1 = nn.Conv1d(channels_in, channels_out, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv1d(channels_out, channels_out, kernel_size=3, padding=1)
+        self.res_conv = (
+            nn.Conv1d(channels_in, channels_out, kernel_size=1)
+            if channels_in != channels_out
+            else nn.Identity()
+        )
 
-        self.norm1 = AdaGroupNorm(num_channels=channels, cond_dim=cond_dim)
-        self.conv1 = conv_cls(channels, channels, kernel_size=3, padding=1)
-        self.norm2 = AdaGroupNorm(num_channels=channels, cond_dim=cond_dim)
-        self.conv2 = conv_cls(channels, channels, kernel_size=3, padding=1)
+        self.norm1 = AdaGroupNorm(num_channels=channels_in, cond_dim=cond_dim)
+        self.norm2 = AdaGroupNorm(num_channels=channels_out, cond_dim=cond_dim)
 
         self.cond_adapter = nn.Sequential(
             nn.Linear(cond_dim, cond_dim),
             self.activation,
-            nn.Linear(cond_dim, channels),
+            nn.Linear(cond_dim, channels_out),
         )
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         """
         Args:
-        - x: (bs, c, L) for 1D or (bs, c, H, W) for 2D
+        - x: (bs, c, L) for 1D
         - cond: (bs, cond_dim)
         Returns:
         - output: same shape as x
         """
-        res = x
-        x = self.conv1(x)  # (bs, c, L)
+        res = x  # (bs, c_in, L)
         x = self.norm1(x, cond)
         x = self.activation(x)
+        x = self.conv1(x)  # (bs, c_out, L)
 
-        cond_adapted = self.cond_adapter(cond)  # (bs, c)
+        cond_adapted = self.cond_adapter(cond)  # (bs, c_out)
         for _ in range(x.ndim - 2):
-            cond_adapted = cond_adapted.unsqueeze(-1)  # (bs, c, 1, ..., 1)
+            cond_adapted = cond_adapted.unsqueeze(-1)  # (bs, c_out, 1, ..., 1)
         x = x + cond_adapted
 
-        x = self.conv2(x)
         x = self.norm2(x, cond)
         x = self.activation(x)
+        x = self.conv2(x)
 
-        return x + res
+        x = x + self.res_conv(res)
+        return x
 
 
-class HAResidualLayer(ResidualLayer):
+class HAResidualLayer(ResidualBlock):
     def __init__(
         self,
         features: int,
@@ -282,7 +286,7 @@ class CrossChannelAttention(nn.Module):
         # Reshape to apply attention across channels at each time step
         # (B, C, L, F) -> (B*L, C, F)
         # This treats each timestep independently and applies cross-channel attention
-        x_reshaped = x.reshape(B * L, C, F)  # (B*L, C, F)
+        x_reshaped = x.permute(0, 2, 1, 3).reshape(B * L, C, F)  # (B*L, C, F)
 
         # Apply transformer layers
         for attn, norm1, ffn, norm2 in zip(
@@ -326,7 +330,9 @@ class AdaGroupNorm(nn.Module):
         nn.init.zeros_(self.linear.weight)
         nn.init.zeros_(self.linear.bias)
 
-    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, cond: torch.Tensor | None = None
+    ) -> torch.Tensor:
         """
         Args:
         - x: (B, C, ...)
@@ -336,6 +342,10 @@ class AdaGroupNorm(nn.Module):
         """
 
         x = self.group_norm(x)  # (B, C, ...)
+
+        # If no conditioning is provided, return normalized x
+        if cond is None:
+            return x
 
         gamma, beta = self.linear(cond).chunk(2, dim=1)  # (B, C)
 
@@ -348,43 +358,6 @@ class AdaGroupNorm(nn.Module):
         out = x * (1 + gamma) + beta  # (B, C, ...)
 
         return out
-
-
-class InitialConvolution(nn.Module):
-    """
-    Provides an initial convolutional layer that extends the channels to a specified output dimension. Uses 1D or 2D convolution based on the input flag.
-    Dataflow: Convolution -> Adaptive Group Normalization -> Activation
-    Dimensions: Input (B, in_channels, L) -> Output (B, out_channels, L) when use_1d is True or (B, out_channels, H, W) when use_1d is False
-    """
-
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        cond_dim: int,
-        use_1d: bool = True,
-        activation: str = "silu",
-    ):
-        super().__init__()
-        if use_1d:
-            self.conv = nn.Conv1d(in_channels, out_channels, kernel_size=3, padding=1)
-        else:
-            self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
-        self.ada_group_norm = AdaGroupNorm(num_channels=out_channels, cond_dim=cond_dim)
-        self.activation = get_activation(activation)
-
-    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-        - x: (B, in_channels, L) when use_1d is True or (B, in_channels, H, W) when use_1d is False
-        - cond: (B, cond_dim)
-        Returns:
-        - out: (B, out_channels, L) when use_1d is True or (B, out_channels, H, W) when use_1d is False
-        """
-        x = self.conv(x)  # (B, out_channels, ...)
-        x = self.ada_group_norm(x, cond)  # (B, out_channels, ...)
-        x = self.activation(x)  # (B, out_channels, ...)
-        return x
 
 
 class SeperableConv1D(nn.Module):
@@ -630,15 +603,11 @@ class MBConv(nn.Module):
 
 
 class TransposedConv(nn.Module):
-    def __init__(
-        self,
-        channels_in: int,
-        channels_out: int,
-    ):
+    def __init__(self, channels: int):
         super().__init__()
         self.transposed_conv = nn.ConvTranspose1d(
-            channels_in,
-            channels_out,
+            channels,
+            channels,
             kernel_size=4,
             stride=2,
             padding=1,
@@ -647,54 +616,50 @@ class TransposedConv(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-        - x: (B, channels_in, L)
+        - x: (B, channels, L)
         Returns:
-        - out: (B, channels_out, L_out = 2 * L)
+        - out: (B, channels, L_out = 2 * L)
         """
-        out = self.transposed_conv(x)  # (B, channels_out, L_out)
+        out = self.transposed_conv(x)  # (B, channels, L_out)
         return out
 
 
 class InterpolationConv(nn.Module):
-    def __init__(
-        self,
-        channels_in: int,
-        channels_out: int,
-    ):
+    def __init__(self, channels: int):
         super().__init__()
-        self.conv = nn.Conv1d(channels_in, channels_out, kernel_size=3, padding=1)
+        self.conv = nn.Conv1d(channels, channels, kernel_size=3, padding=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-        - x: (B, channels_in, L)
+        - x: (B, channels, L)
         Returns:
-        - out: (B, channels_out, L_out = 2 * L)
+        - out: (B, channels, L_out = 2 * L)
         """
         x_upsampled = nn.functional.interpolate(
             x, scale_factor=2, mode="linear", align_corners=False
-        )  # (B, channels_in, L_out)
-        out = self.conv(x_upsampled)  # (B, channels_out, L_out)
+        )  # (B, channels, L_out)
+        out = self.conv(x_upsampled)  # (B, channels, L_out)
         return out
 
 
 class PixelShuffle(nn.Module):
-    def __init__(self, channels_in: int, channels_out: int):
+    def __init__(self, channels: int):
         super().__init__()
-        self.channels_out = channels_out
-        self.conv = nn.Conv1d(channels_in, channels_out * 2, kernel_size=3, padding=1)
+        self.channels = channels
+        self.conv = nn.Conv1d(channels, channels * 2, kernel_size=3, padding=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-        - x: (B, channels_in, L)
+        - x: (B, channels, L)
         Returns:
-        - out: (B, channels_out, L_out = 2 * L)
+        - out: (B, channels, L_out = 2 * L)
         """
         batch_size, _, seq_len = x.size()
-        x = self.conv(x)  # (B, channels_out * 2, L)
-        x = x.view(batch_size, self.channels_out, 2, seq_len)  # (B, channels_out, 2, L)
-        x = x.permute(0, 1, 3, 2).contiguous()  # (B, channels_out, L, 2)
-        out = x.view(batch_size, self.channels_out, seq_len * 2)
+        x = self.conv(x)  # (B, channels * 2, L)
+        x = x.view(batch_size, self.channels, 2, seq_len)  # (B, channels, 2, L)
+        x = x.permute(0, 1, 3, 2).contiguous()  # (B, channels, L, 2)
+        out = x.view(batch_size, self.channels, seq_len * 2)
 
         return out

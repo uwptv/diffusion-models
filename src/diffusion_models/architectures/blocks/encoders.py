@@ -7,7 +7,7 @@ from diffusion_models.architectures.blocks.base import (
     CrossChannelAttention,
     HAResidualLayer,
     MBConv,
-    ResidualLayer,
+    ResidualBlock,
     SeperableConv1D,
     get_activation,
 )
@@ -21,20 +21,20 @@ class Encoder1D(nn.Module):
         channels_out: int,
         num_residual_layers: int,
         cond_dim: int,
-        activation: str = "silu",
     ):
         super().__init__()
-        self.res_blocks = nn.ModuleList(
-            [
-                ResidualLayer(channels_in, cond_dim, use_1d=True)
-                for _ in range(num_residual_layers)
-            ]
-        )
+        self.res_blocks = nn.ModuleList()
+
+        # First residual block expands channels: channels_in -> channels_out
+        self.res_blocks.append(ResidualBlock(channels_in, channels_out, cond_dim))
+
+        # Remaining blocks keep channels fixed: channels_out -> channels_out
+        for _ in range(num_residual_layers - 1):
+            self.res_blocks.append(ResidualBlock(channels_out, channels_out, cond_dim))
+
         self.downsample = nn.Conv1d(
-            channels_in, channels_out, kernel_size=3, stride=2, padding=1
+            channels_out, channels_out, kernel_size=3, stride=2, padding=1
         )
-        self.norm = AdaGroupNorm(num_channels=channels_out, cond_dim=cond_dim)
-        self.activation = get_activation(activation)
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
@@ -42,16 +42,17 @@ class Encoder1D(nn.Module):
         - x: (bs, c_in, L)
         - cond_embed: (bs, cond_dim)
         """
-        # Pass through residual blocks: (bs, c_in, L) -> (bs, c_in, L)
+        # Pass through residual blocks: (bs, c_in, L) -> (bs, c_out, L)
         for block in self.res_blocks:
             x = block(x, cond_embed)
 
-        # Downsample: (bs, c_in, L) -> (bs, c_out, L // 2)
-        x = self.downsample(x)
-        x = self.norm(x, cond_embed)
-        x = self.activation(x)
+        # Save skip connection
+        skip = x.clone()  # (bs, c_out, L)
 
-        return x
+        # Downsample: (bs, c_out, L) -> (bs, c_out, L // 2)
+        x = self.downsample(x)
+
+        return x, skip
 
 
 class CBAMEncoder(Encoder1D):
@@ -149,7 +150,7 @@ class TFiLMEncoder(nn.Module):
         super().__init__()
         self.res_blocks = nn.ModuleList(
             [
-                ResidualLayer(channels_in, cond_dim=cond_dim, use_1d=True)
+                ResidualBlock(channels_in, cond_dim=cond_dim, use_1d=True)
                 for _ in range(num_residual_layers)
             ]
         )

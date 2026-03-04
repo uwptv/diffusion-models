@@ -5,7 +5,7 @@ from diffusion_models.architectures.blocks.base import (
     CBAM,
     HAResidualLayer,
     MBConv,
-    ResidualLayer,
+    ResidualBlock,
     SinusoidalEmbedding,
 )
 from diffusion_models.architectures.blocks.tfilm import TFiLM, TFiLMTransformer
@@ -16,7 +16,7 @@ class Midcoder1D(nn.Module):
         super().__init__()
         self.res_blocks = nn.ModuleList(
             [
-                ResidualLayer(channels, cond_dim, use_1d=True)
+                ResidualBlock(channels, channels, cond_dim)
                 for _ in range(num_residual_layers)
             ]
         )
@@ -45,7 +45,10 @@ class CBAMMidcoder(nn.Module):
     ):
         super().__init__()
         self.res_blocks = nn.ModuleList(
-            [ResidualLayer(channels, cond_dim) for _ in range(num_residual_layers)]
+            [
+                ResidualBlock(channels, channels, cond_dim)
+                for _ in range(num_residual_layers)
+            ]
         )
         self.cbam_blocks = nn.ModuleList(
             [
@@ -129,7 +132,7 @@ class TFiLMMidcoder(nn.Module):
         super().__init__()
         self.res_blocks = nn.ModuleList(
             [
-                ResidualLayer(channels, cond_dim=cond_dim, use_1d=True)
+                ResidualBlock(channels, cond_dim=cond_dim, use_1d=True)
                 for _ in range(num_residual_layers)
             ]
         )
@@ -261,7 +264,7 @@ class TransformerMidcoder(Midcoder1D):
         - x: (bs, c, L)
         - cond_embed: (bs, cond_dim)
         """
-        super().forward(x, cond_embed)  # Pass through residual layers first
+        x = super().forward(x, cond_embed)  # Pass through residual layers first
 
         _, _, seq_len = x.shape
 

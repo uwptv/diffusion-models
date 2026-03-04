@@ -54,23 +54,22 @@ class UNet(ConditionalVectorField, ABC):
         cond = self.conditioner(t, y)  # (bs, cond_dim)
 
         # Initial convolution
-        x = self.init_conv(x, cond)  # (bs, c_0, ...)
+        x = self.init_conv(x)  # (bs, c_0, ...)
 
         skip_connections = []
 
         # Encoder path
         for encoder in self.encoders:
-            x = encoder(x, cond)
-            skip_connections.append(x.clone())
+            x, skip = encoder(x, cond)
+            skip_connections.append(skip.clone())
 
         # Midcoder
         x = self.midcoder(x, cond)
 
-        # Decoder path with ADDITIVE skip connections
+        # Decoder path with concatenative skip connections
         for decoder in self.decoders:
             skip_x = skip_connections.pop()
-            x = x + skip_x
-            x = decoder(x, cond)
+            x = decoder(x, skip_x, cond)
 
         # Final convolution
         x = self.final_conv(x)  # (bs, c, ...)

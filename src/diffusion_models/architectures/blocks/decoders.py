@@ -7,7 +7,7 @@ from diffusion_models.architectures.blocks.base import (
     CrossChannelAttention,
     HAResidualLayer,
     MBConv,
-    ResidualLayer,
+    ResidualBlock,
     SeperableConv1D,
     get_activation,
     get_upsampling,
@@ -23,40 +23,32 @@ class Decoder1D(nn.Module):
         method: str,
         num_residual_layers: int,
         cond_dim: int,
-        activation: str = "silu",
     ):
         super().__init__()
-        upsample_method = get_upsampling(method)
-        self.upsample = upsample_method(channels_in, channels_out)
-        self.res_blocks = nn.ModuleList(
-            [
-                ResidualLayer(channels_out, cond_dim, use_1d=True)
-                for _ in range(num_residual_layers)
-            ]
-        )
-        self.norm = AdaGroupNorm(num_channels=channels_out, cond_dim=cond_dim)
-        self.activation = get_activation(activation)
-        self.refinement = nn.Conv1d(
-            channels_out, channels_out, kernel_size=3, padding=1
-        )
+        self.res_blocks = nn.ModuleList()
 
-    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+        self.res_blocks.append(ResidualBlock(channels_in, channels_out, cond_dim))
+        for _ in range(num_residual_layers - 1):
+            self.res_blocks.append(ResidualBlock(channels_out, channels_out, cond_dim))
+
+        upsample_method = get_upsampling(method)
+        self.upsample = upsample_method(channels_in // 2)
+
+    def forward(
+        self, x: torch.Tensor, skip: torch.Tensor, cond_embed: torch.Tensor
+    ) -> torch.Tensor:
         """
         Args:
-        - x: (bs, c_in, L)
+        - x: (bs, c_in // 2, L)
+        - skip: (bs, c_in // 2, L)
         - cond_embed: (bs, cond_dim)
+        Returns:#
+        - x: (bs, c_out, 2*L)
         """
-        # Upsample: (bs, c_in, L) -> (bs, c_out, 2*L)
-        x = self.upsample(x)
-        x = self.norm(x, cond_embed)
-        x = self.activation(x)
+        x = self.upsample(x)  # (bs, c_in // 2, 2*L)
+        x = torch.cat([x, skip], dim=1)  # (bs, c_in, 2 *L)
 
-        # Refine the upsampled features
-        x = self.refinement(x)
-        x = self.norm(x, cond_embed)
-        x = self.activation(x)
-
-        # Pass through residual blocks: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
+        # Pass through residual blocks: (bs, c_in, 2 * L) -> (bs, c_out, 2 * L)
         for block in self.res_blocks:
             x = block(x, cond_embed)
 
@@ -179,7 +171,7 @@ class TFiLMDecoder(nn.Module):
 
         self.res_blocks = nn.ModuleList(
             [
-                ResidualLayer(channels_out, cond_dim=cond_dim, use_1d=True)
+                ResidualBlock(channels_out, cond_dim=cond_dim, use_1d=True)
                 for _ in range(num_residual_layers)
             ]
         )

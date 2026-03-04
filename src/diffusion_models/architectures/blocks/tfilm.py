@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from .base import AdaGroupNorm, SinusoidalEmbedding
+from .base import SinusoidalEmbedding
 
 
 class TFiLM(nn.Module):
@@ -155,23 +155,15 @@ class _TFiLMTransformerLayer(nn.Module):
     def __init__(
         self,
         d_model: int,
-        num_blocks: int,
         num_heads: int,
         dim_feedforward: int,
-        cond_dim: int,
-        dropout: float = 0.0,
     ) -> None:
         super().__init__()
         self.self_attn = nn.MultiheadAttention(
-            embed_dim=d_model, num_heads=num_heads, dropout=dropout, batch_first=True
+            embed_dim=d_model, num_heads=num_heads, batch_first=True
         )
         self.linear1 = nn.Linear(d_model, dim_feedforward)
         self.linear2 = nn.Linear(dim_feedforward, d_model)
-        self.norm1 = AdaGroupNorm(num_channels=num_blocks, cond_dim=cond_dim)
-        self.norm2 = AdaGroupNorm(num_channels=num_blocks, cond_dim=cond_dim)
-        self.dropout = nn.Dropout(dropout)
-        self.dropout1 = nn.Dropout(dropout)
-        self.dropout2 = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         """
@@ -187,7 +179,10 @@ class _TFiLMTransformerLayer(nn.Module):
         )  # (B, num_blocks, d_model)
 
         # Pass through MLP
-        x = self.norm1(x + self.dropout1(attn_out), cond)
-        ff = self.linear2(self.dropout(torch.relu(self.linear1(x))))
-        x = self.norm2(x + self.dropout2(ff), cond)
+        x = x + attn_out
+        x = self.linear1(x)
+        x = torch.nn.SiLU(x)
+        ff = self.linear2(x)
+        ff = torch.nn.SiLU(ff)
+        x = x + ff
         return x

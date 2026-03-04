@@ -7,6 +7,7 @@ import mlflow
 import optuna
 import torch
 
+from diffusion_models.dynamics.prob_paths import Sampleable
 from diffusion_models.metrics.evaluate_metrics import compute_all_metrics
 from diffusion_models.trainers import CFGTrainer, EarlyStopping
 from diffusion_models.utils.sizes import (
@@ -21,6 +22,7 @@ from diffusion_models.utils.sizes import (
 @dataclass(frozen=True)
 class TrainingConfig:
     # Dataset parameters
+    dataset: Sampleable
     num_classes: int
     channels: int
     sequence_length: int
