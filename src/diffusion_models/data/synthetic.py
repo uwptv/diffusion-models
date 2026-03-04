@@ -2,6 +2,7 @@ from typing import List, Tuple
 
 import torch
 import torch.nn as nn
+from matplotlib import pyplot as plt
 
 from diffusion_models.data.base import Sampleable
 
@@ -101,6 +102,12 @@ class WaveSampler(nn.Module, Sampleable):
         self._gen = torch.Generator(device=self.dummy.device)
         if self._seed is not None:
             self._gen.manual_seed(self._seed)
+        self.mean = torch.Tensor(
+            [[[0.0850], [0.0448], [0.1261]]]
+        )  # precomputed mean of dataset for all the channels, shape (1, 3, 1)
+        self.std = torch.Tensor(
+            [[[1.5518], [1.2797], [2.1694]]]
+        )  # precomputed std of dataset for all the channels, shape (1, 3, 1)
 
     def reset_generator(self) -> None:
         """Reset the generator to its initial state for reproducibility."""
@@ -108,13 +115,26 @@ class WaveSampler(nn.Module, Sampleable):
         if self._seed is not None:
             self._gen.manual_seed(self._seed)
 
+    def _get_mean_std(self, waves: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        # compute mean and std across all samples and time steps for each channel
+        mean = waves.mean(dim=(0, 2), keepdim=True)
+        std = waves.std(dim=(0, 2), keepdim=True) + 1e-6
+        return mean, std
+
+    def normalize(self, waves: torch.Tensor) -> torch.Tensor:
+        return (waves - self.mean) / self.std
+
+    def denormalize(self, waves: torch.Tensor) -> torch.Tensor:
+        return waves * self.std + self.mean
+
     def sample(
         self,
         num_samples: int,
         mean: float = 4.0,
-        std: float = 2.0,
+        std: float = 1.0,
         class_idx: int | None = None,
         subset: str | None = None,
+        normalize: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
@@ -123,6 +143,7 @@ class WaveSampler(nn.Module, Sampleable):
             - std: standard deviation of normal distribution for frequencies
             - class_idx: if specified, sample only from this class. If None, sample from all classes.
             - subset: if specified, sample from this subset of data (e.g., "train", "val", "test"), not used in this synthetic sampler but included for compatibility with DataSampler interface
+            - normalize: whether to normalize the samples using mean and std of the dataset
         Returns:
             - samples: (num_samples, 3, signal_length)
             - labels: (num_samples, 1) with class index repeated
@@ -163,7 +184,7 @@ class WaveSampler(nn.Module, Sampleable):
             * std
             + mean
         )
-        frequencies = torch.clamp(frequencies, min=1e-6)
+        frequencies = torch.clamp(frequencies, min=1.0)
 
         amps = amplitudes_tensor[class_indices - 1].unsqueeze(1)
         freqs = frequencies.unsqueeze(1)
@@ -176,23 +197,25 @@ class WaveSampler(nn.Module, Sampleable):
         # Add noise to each wave type
         for waves in [sine_waves, sawtooth_waves, square_waves]:
             noise = 0.3 * torch.randn(
-            waves.shape, device=self.dummy.device, generator=self._gen
+                waves.shape, device=self.dummy.device, generator=self._gen
             )
             waves += noise
 
         waves = torch.stack([sine_waves, sawtooth_waves, square_waves], dim=1)
         labels = class_indices.unsqueeze(1)
 
+        if normalize:
+            waves = self.normalize(waves)
+
         return waves, labels
 
 
 if __name__ == "__main__":
     sampler = WaveSampler()
-    samples, labels = sampler.sample(num_samples=10, class_idx=2)
-    from matplotlib import pyplot as plt
+    samples, labels = sampler.sample(num_samples=1000)
 
     plt.figure(figsize=(10, 5))
-    for j in range(10):
+    for j in range(1):
         for i in range(3):
             plt.subplot(3, 1, i + 1)
             plt.plot(samples[j, i].cpu().detach().numpy())

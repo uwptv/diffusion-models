@@ -18,13 +18,14 @@ sampler = WaveSampler()
 real_data = []
 for class_idx in range(3):
     samples, _ = sampler.sample(num_samples=100, class_idx=class_idx)
+    samples = sampler.denormalize(samples).to(device)
     real_data.append(samples.cpu())
 
 # Generate t-SNE plot
 model.plot_tsne(
     p_data_shape=[3, 128],
     real_data=real_data,
-    num_samples=1000,
+    num_samples=100,
     guidance_scale=2.0,
     class_names=["amp1", "amp2", "amp3"],
     device=device,
