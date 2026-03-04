@@ -9,6 +9,8 @@ from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityP
 from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
 from diffusion_models.training_config import (
     TrainingConfig,
+    evaluate_model,
+    retrain_best_model,
     run_objective_trial,
 )
 
@@ -22,8 +24,6 @@ cfg = TrainingConfig(
     experiment_name="standard_unet",
     model_name="standard_unet_toy",
     use_toy=True,
-    num_trials=1,
-    max_num_epochs=1,
 )
 
 # Initialize probability path
@@ -88,13 +88,13 @@ if __name__ == "__main__":
     )
     study.optimize(objective, n_trials=cfg.num_trials)
 
-    # model, run_id = retrain_best_model(
-    #     study=study,
-    #     cfg=cfg,
-    #     build_model=build_model,
-    #     path=path,
-    #     device=device,
-    # )
+    model, run_id = retrain_best_model(
+        study=study,
+        cfg=cfg,
+        build_model=build_model,
+        path=path,
+        device=device,
+    )
 
-    # # Evaluate the model on all metrics
-    # evaluate_model(model, path, cfg, run_id)
+    # Evaluate the model on all metrics
+    evaluate_model(model, path, cfg, run_id)

@@ -2,7 +2,11 @@ from abc import ABC
 from typing import List
 
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
+from matplotlib.figure import Figure
+from sklearn.manifold import TSNE
+from sklearn.preprocessing import StandardScaler
 
 from diffusion_models.architectures.blocks.base import Conditioner
 from diffusion_models.dynamics.base import CFGVectorFieldODE, ConditionalVectorField
@@ -213,3 +217,141 @@ class UNet(ConditionalVectorField, ABC):
         plt.close()
 
         return all_samples
+
+    @torch.no_grad()
+    def plot_tsne(
+        self,
+        p_data_shape: List[int],
+        real_data: List[torch.Tensor],
+        num_samples: int = 1000,
+        num_timesteps: int = 30,
+        guidance_scale: float = 2.0,
+        perplexity: int = 30,
+        class_names: List[str] | None = None,
+        device: torch.device = None,
+    ) -> Figure:
+        """
+        Generate samples and create a t-SNE plot comparing real vs generated data.
+
+        Args:
+            p_data_shape: Shape of the data (channels, length)
+            real_data: List of real data tensors per class. Each tensor: (N, C, L)
+            num_samples: Number of samples to generate per class
+            num_timesteps: Number of ODE timesteps
+            guidance_scale: Classifier-free guidance scale
+            perplexity: t-SNE perplexity
+            class_names: Optional class names for the legend
+            device: Device to run on
+
+        Returns:
+            Matplotlib Figure with the t-SNE plot
+        """
+        if device is None:
+            device = next(self.parameters()).device
+
+        num_classes = len(real_data)
+
+        all_features = []
+        labels = []
+        sources = []
+
+        for class_idx in range(num_classes):
+            # Subsample real data
+            real = real_data[class_idx][:num_samples]
+            real_flat = real.cpu().reshape(real.shape[0], -1).numpy()
+
+            # Generate samples
+            generated = self.sample(
+                num_samples=num_samples,
+                p_data_shape=p_data_shape,
+                class_idx=class_idx,
+                num_timesteps=num_timesteps,
+                guidance_scale=guidance_scale,
+                device=device,
+            )
+            gen_flat = generated.cpu().reshape(generated.shape[0], -1).numpy()
+
+            all_features.append(real_flat)
+            labels.extend([class_idx] * len(real_flat))
+            sources.extend(["real"] * len(real_flat))
+
+            all_features.append(gen_flat)
+            labels.extend([class_idx] * len(gen_flat))
+            sources.extend(["generated"] * len(gen_flat))
+
+        all_features = np.concatenate(all_features, axis=0)
+        labels = np.array(labels)
+        sources = np.array(sources)
+
+        # Scale features to [0, 1] for better t-SNE performance
+        scaler = StandardScaler()
+        all_features = scaler.fit_transform(all_features)
+
+        # Run t-SNE
+        tsne = TSNE(
+            n_components=2, perplexity=perplexity, random_state=42, max_iter=1000
+        )
+        embeddings = tsne.fit_transform(all_features)
+
+        # Plot
+        fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+
+        # Use more differentiable colors
+        colors = [
+            "#1f77b4",  # blue
+            "#ff7f0e",  # orange
+            "#2ca02c",  # green
+            "#d62728",  # red
+            "#9467bd",  # purple
+            "#8c564b",  # brown
+            "#e377c2",  # pink
+            "#7f7f7f",  # gray
+            "#bcbd22",  # olive
+            "#17becf",  # cyan
+        ]
+
+        for class_idx in range(num_classes):
+            cls_name = (
+                class_names[class_idx]
+                if class_names and class_idx < len(class_names)
+                else f"Class {class_idx}"
+            )
+
+            color = colors[class_idx % len(colors)]
+
+            # Real: filled circles
+            mask_real = (labels == class_idx) & (sources == "real")
+            ax.scatter(
+                embeddings[mask_real, 0],
+                embeddings[mask_real, 1],
+                c=color,
+                marker="o",
+                alpha=0.6,
+                s=30,
+                edgecolors="black",
+                linewidth=0.5,
+                label=f"{cls_name} (real)",
+            )
+
+            # Generated: crosses (larger for visibility)
+            mask_gen = (labels == class_idx) & (sources == "generated")
+            ax.scatter(
+                embeddings[mask_gen, 0],
+                embeddings[mask_gen, 1],
+                c=color,
+                marker="x",
+                alpha=0.6,
+                s=60,
+                linewidth=1.5,
+                label=f"{cls_name} (generated)",
+            )
+
+        ax.set_title(
+            f"t-SNE: Real vs Generated (guidance_scale={guidance_scale})", fontsize=12
+        )
+        ax.legend(loc="best", fontsize=9, markerscale=1.5)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        plt.tight_layout()
+        plt.show()
+        plt.close()
