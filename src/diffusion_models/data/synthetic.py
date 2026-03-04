@@ -169,16 +169,16 @@ class WaveSampler(nn.Module, Sampleable):
         freqs = frequencies.unsqueeze(1)
 
         sine_waves = amps * torch.sin(2 * torch.pi * freqs * t + self.phase)
-        noise = 0.3 * torch.randn(
-            sine_waves.shape, device=self.dummy.device, generator=self._gen
-        )
         sawtooth_waves = amps * (2 * (freqs * t - torch.floor(0.5 + freqs * t)))
         square_waves = amps * torch.sign(
             torch.sin(2 * torch.pi * freqs * t + self.phase)
         )
-        sine_waves = sine_waves + noise
-        sawtooth_waves = sawtooth_waves + noise
-        square_waves = square_waves + noise
+        # Add noise to each wave type
+        for waves in [sine_waves, sawtooth_waves, square_waves]:
+            noise = 0.3 * torch.randn(
+            waves.shape, device=self.dummy.device, generator=self._gen
+            )
+            waves += noise
 
         waves = torch.stack([sine_waves, sawtooth_waves, square_waves], dim=1)
         labels = class_indices.unsqueeze(1)
