@@ -137,6 +137,8 @@ class UNet(ConditionalVectorField, ABC):
     def visualize(
         self,
         p_data_shape: List[int],
+        dataset_mean: torch.Tensor,
+        dataset_std: torch.Tensor,
         class_idx: int | None = None,
         num_timesteps: int = 30,
         guidance_scales: List[float] = [2.0, 3.0, 4.0],
@@ -187,6 +189,10 @@ class UNet(ConditionalVectorField, ABC):
                     guidance_scale=float(gs),
                     device=device,
                 )  # (1, channels, length)
+
+                # Apply denormalization for visualization
+                sample = sample * dataset_std + dataset_mean
+
                 all_samples[(cls_idx, float(gs))] = sample
                 sample_np = sample[0].cpu().numpy()  # (channels, length)
 
@@ -223,6 +229,8 @@ class UNet(ConditionalVectorField, ABC):
         self,
         p_data_shape: List[int],
         real_data: List[torch.Tensor],
+        dataset_mean: torch.Tensor,
+        dataset_std: torch.Tensor,
         num_samples: int = 1000,
         num_timesteps: int = 30,
         guidance_scale: float = 2.0,
@@ -268,7 +276,11 @@ class UNet(ConditionalVectorField, ABC):
                 num_timesteps=num_timesteps,
                 guidance_scale=guidance_scale,
                 device=device,
-            )
+            )  # (num_samples, channels, length)
+
+            # Apply denormalization
+            generated = generated * dataset_std.to(device) + dataset_mean.to(device)
+
             gen_flat = generated.cpu().reshape(generated.shape[0], -1).numpy()
 
             all_features.append(real_flat)

@@ -121,6 +121,10 @@ class WaveSampler(nn.Module, Sampleable):
         std = waves.std(dim=(0, 2), keepdim=True) + 1e-6
         return mean, std
 
+    def get_mean_std(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Return the precomputed mean and std tensors."""
+        return self.mean, self.std
+
     def normalize(self, waves: torch.Tensor) -> torch.Tensor:
         return (waves - self.mean) / self.std
 
@@ -131,7 +135,7 @@ class WaveSampler(nn.Module, Sampleable):
         self,
         num_samples: int,
         mean: float = 4.0,
-        std: float = 1.0,
+        std: float = 2.0,
         class_idx: int | None = None,
         subset: str | None = None,
         normalize: bool = True,
