@@ -157,8 +157,12 @@ class _TFiLMTransformerLayer(nn.Module):
         self.self_attn = nn.MultiheadAttention(
             embed_dim=d_model, num_heads=num_heads, batch_first=True
         )
-        self.linear1 = nn.Linear(d_model, dim_feedforward)
-        self.linear2 = nn.Linear(dim_feedforward, d_model)
+        self.norm = nn.LayerNorm(d_model)
+        self.mlp = nn.Sequential(
+            nn.Linear(d_model, dim_feedforward),
+            nn.SiLU(),
+            nn.Linear(dim_feedforward, d_model),
+        )
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         """
@@ -175,9 +179,8 @@ class _TFiLMTransformerLayer(nn.Module):
 
         # Pass through MLP
         x = x + attn_out
-        x = self.linear1(x)
-        x = torch.nn.SiLU(x)
-        ff = self.linear2(x)
-        ff = torch.nn.SiLU(ff)
+        x = self.norm(x)
+        ff = self.mlp(x)
         x = x + ff
+        x = self.norm(x)
         return x

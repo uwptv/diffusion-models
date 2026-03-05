@@ -128,7 +128,7 @@ class TFiLMUNetTransformer(UNet):
             )
             decoders.append(
                 TransFiLMDecoder(
-                    next_c,
+                    2 * next_c,
                     curr_c,
                     upsampling_method,
                     num_residual_layers,

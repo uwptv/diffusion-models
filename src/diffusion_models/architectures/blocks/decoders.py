@@ -218,7 +218,6 @@ class TransFiLMDecoder(TFiLMDecoder):
         )
         # Replace TFiLM mechanism with Transformer Mechanism
         self.tfilm = TFiLMTransformer(
-            cond_dim=cond_dim,
             channels=channels_out,
             num_blocks=num_tfilm_blocks,
             num_heads=num_transformer_heads,
