@@ -64,21 +64,29 @@ class CBAMEncoder(Encoder1D):
         cond_dim: int,
         cbam_reduction_ratio: int,
         cbam_kernel_size: int,
-        activation: str = "silu",
     ):
-        super().__init__(
-            channels_in, channels_out, num_residual_layers, cond_dim, activation
-        )
+        super().__init__(channels_in, channels_out, num_residual_layers, cond_dim)
         self.cbam = CBAM(channels_out, cbam_reduction_ratio, cbam_kernel_size)
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
-        # Pass through base encoder block
-        x = super().forward(x, cond_embed)
+        """
+        Args:
+        - x: (bs, c_in, L)
+        - cond_embed: (bs, cond_dim)
+        Returns:
+        - x: (bs, c_out, L // 2)
+        - skip: (bs, c_out, L)
+        """
+        for block in self.res_blocks:
+            x = block(x, cond_embed)  # ( bs, c_out, L)
+            # Enhance features with CBAM
+            x = self.cbam(x)
 
-        # Enhance with CBAM: (bs, c_out, L // 2) -> (bs, c_out, L // 2)
-        x = self.cbam(x)
+        skip = x.clone()
 
-        return x
+        x = self.downsample(x)
+
+        return x, skip
 
 
 class MBConvEncoder(Encoder1D):
@@ -86,53 +94,49 @@ class MBConvEncoder(Encoder1D):
         self,
         channels_in: int,
         channels_out: int,
-        num_residual_layers: int,
         cond_dim: int,
         num_mbconv_layers: int,
         expansion_factor: int,
         kernel_size: int,
-        activation: str = "silu",
     ):
-        super().__init__(
-            channels_in, channels_out, num_residual_layers, cond_dim, activation
+        self.mbconv_blocks = nn.ModuleList()
+
+        # First block is a MBConvBlock that doubles channels
+        self.mbconv_blocks.append(
+            MBConv(
+                channels_in,
+                channels_out,
+                cond_dim,
+                expansion_factor,
+                kernel_size,
+            )
         )
-        self.downsample = MBConv(
-            channels_in=channels_in,
-            channels_out=channels_out,
-            cond_dim=cond_dim,
-            expansion_factor=expansion_factor,
-            kernel_size=kernel_size,
-            stride=2,
-        )
-        self.mbconvstack = nn.ModuleList(
-            [
+
+        # Remaining blocks are MBConvBlocks that keep channels fixed
+        for _ in range(num_mbconv_layers - 1):
+            self.mbconv_blocks.append(
                 MBConv(
-                    channels_in=channels_out,
-                    channels_out=channels_out,
-                    cond_dim=cond_dim,
-                    expansion_factor=expansion_factor,
-                    kernel_size=kernel_size,
-                    stride=1,
+                    channels_out,
+                    channels_out,
+                    cond_dim,
+                    expansion_factor,
+                    kernel_size,
                 )
-                for _ in range(num_mbconv_layers - 1)
-            ]
+            )
+
+        self.downsample = nn.Conv1d(
+            channels_out, channels_out, kernel_size=3, stride=2, padding=1
         )
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
-        # Pass through residual blocks: (bs, c_in, L) -> (bs, c_in, L)
-        for block in self.res_blocks:
-            x = block(x, cond_embed)
+        for block in self.mbconv_blocks:
+            x = block(x, cond_embed)  # ( bs, c_out, L)
 
-        # Downsample using MBConv: (bs, c_in, L) -> (bs, c_out, L // 2)
-        x = self.downsample(x, cond_embed)
+        skip = x.clone()
 
-        # Pass through additional MBConv layers: (bs, c_out, L // 2) -> (bs, c_out, L // 2)
-        for mbconv in self.mbconvstack:
-            x = mbconv(x, cond_embed)
+        x = self.downsample(x)
 
-        # No activation here, as MBConv intentionally uses linear output
-
-        return x
+        return x, skip
 
 
 class TFiLMEncoder(nn.Module):
@@ -148,11 +152,18 @@ class TFiLMEncoder(nn.Module):
         activation: str = "silu",
     ):
         super().__init__()
-        self.res_blocks = nn.ModuleList(
-            [
-                ResidualBlock(channels_in, cond_dim=cond_dim, use_1d=True)
-                for _ in range(num_residual_layers)
-            ]
+        self.res_blocks = nn.ModuleList()
+        # First residual block expands channels: channels_in -> channels_out
+        self.res_blocks.append(ResidualBlock(channels_in, channels_out, cond_dim))
+
+        # Remaining blocks keep channels fixed: channels_out -> channels_out
+        for _ in range(num_residual_layers - 1):
+            self.res_blocks.append(ResidualBlock(channels_out, channels_out, cond_dim))
+        self.tfilm = TFiLM(
+            num_blocks=num_tfilm_blocks,
+            channels=channels_out,
+            rnn_hidden=hidden_size_rnn,
+            rnn_layers=num_layers_rnn,
         )
         self.downsample = nn.Conv1d(
             channels_in,
@@ -160,13 +171,6 @@ class TFiLMEncoder(nn.Module):
             kernel_size=3,
             stride=2,
             padding=1,
-        )
-        self.activation = get_activation(activation)
-        self.tfilm = TFiLM(
-            num_blocks=num_tfilm_blocks,
-            channels=channels_out,
-            rnn_hidden=hidden_size_rnn,
-            rnn_layers=num_layers_rnn,
         )
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
@@ -178,15 +182,11 @@ class TFiLMEncoder(nn.Module):
         # Pass through residual blocks: (bs, c_in, L) -> (bs, c_in, L)
         for block in self.res_blocks:
             x = block(x, cond=cond_embed)
+            # Enhance features with TFiLM after each residual block
+            x = self.tfilm(x, cond_embed)
 
         # Downsample: (bs, c_in, L) -> (bs, c_out, L // 2)
         x = self.downsample(x)
-
-        # Apply activation: (bs, c_out, L // 2) -> (bs, c_out, L // 2)
-        x = self.activation(x)
-
-        # Apply TFiLM: (bs, c_out, L // 2) -> (bs, c_out, L // 2)
-        x = self.tfilm(x, cond_embed)
 
         return x
 
@@ -200,7 +200,6 @@ class TransFiLMEncoder(TFiLMEncoder):
         cond_dim: int,
         num_tfilm_blocks: int,
         num_transformer_heads: int,
-        num_transformer_layers: int,
         ffn_dim_multiplier: int,
         activation: str = "silu",
     ):
@@ -220,7 +219,7 @@ class TransFiLMEncoder(TFiLMEncoder):
             channels=channels_out,
             num_blocks=num_tfilm_blocks,
             num_heads=num_transformer_heads,
-            num_layers=num_transformer_layers,
+            num_layers=1,
             ffn_dim_multiplier=ffn_dim_multiplier,
         )
 

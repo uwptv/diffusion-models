@@ -56,7 +56,6 @@ def objective(trial: optuna.Trial) -> float:
     num_transformer_heads = trial.suggest_categorical(
         "num_transformer_heads", [1, 2, 4]
     )
-    num_transformer_layers = trial.suggest_int("num_transformer_layers", 1, 1)
     ffn_dim_multiplier = trial.suggest_categorical("ffn_dim_multiplier", [2])
 
     # Hyperparameters for training
@@ -73,7 +72,6 @@ def objective(trial: optuna.Trial) -> float:
             upsampling_method,
             num_tfilm_blocks,
             num_transformer_heads,
-            num_transformer_layers,
             ffn_dim_multiplier,
             eta,
             lr,
@@ -98,7 +96,6 @@ def objective(trial: optuna.Trial) -> float:
         cond_dim=cond_dim,
         num_tfilm_blocks=num_tfilm_blocks,
         num_transformer_heads=num_transformer_heads,
-        num_transformer_layers=num_transformer_layers,
         ffn_dim_multiplier=ffn_dim_multiplier,
     )
     trainer = CFGTrainer(
@@ -145,7 +142,6 @@ def objective(trial: optuna.Trial) -> float:
                 "learning_rate": f"{lr:.3}",
                 "num_tfilm_blocks": num_tfilm_blocks,
                 "num_transformer_heads": num_transformer_heads,
-                "num_transformer_layers": num_transformer_layers,
                 "ffn_dim_multiplier": ffn_dim_multiplier,
             }
         )
@@ -213,7 +209,6 @@ if __name__ == "__main__":
             cond_dim=study.best_params["cond_dim"],
             num_tfilm_blocks=study.best_params["num_tfilm_blocks"],
             num_transformer_heads=study.best_params["num_transformer_heads"],
-            num_transformer_layers=study.best_params["num_transformer_layers"],
             ffn_dim_multiplier=study.best_params["ffn_dim_multiplier"],
         )
         trainer = CFGTrainer(

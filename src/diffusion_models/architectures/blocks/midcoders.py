@@ -50,12 +50,7 @@ class CBAMMidcoder(nn.Module):
                 for _ in range(num_residual_layers)
             ]
         )
-        self.cbam_blocks = nn.ModuleList(
-            [
-                CBAM(channels, cbam_reduction_ratio, cbam_kernel_size)
-                for _ in range(num_residual_layers)
-            ]
-        )
+        self.cbam = CBAM(channels, cbam_reduction_ratio, cbam_kernel_size)
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         """
@@ -64,9 +59,9 @@ class CBAMMidcoder(nn.Module):
         - cond: (bs, cond_dim)
         """
         # Pass through residual blocks and CBAM blocks: (bs, c, L) -> (bs, c, L)
-        for res_block, cbam_block in zip(self.res_blocks, self.cbam_blocks):
-            x = res_block(x, cond)
-            x = cbam_block(x)
+        for block in self.res_blocks:
+            x = block(x, cond)
+            x = self.cbam(x)
 
         return x
 
@@ -75,35 +70,24 @@ class MBConvMidcoder(Midcoder1D):
     def __init__(
         self,
         channels: int,
-        num_residual_layers: int,
         cond_dim: int,
         num_mbconv_layers: int,
         expansion_factor: int,
         kernel_size: int,
     ):
-        super().__init__(channels, num_residual_layers, cond_dim)
-        self.mbconv_blocks = nn.ModuleList(
-            [
-                MBConv(channels, channels, cond_dim, expansion_factor, kernel_size, 1)
-                for _ in range(num_mbconv_layers)
-            ]
-        )
+        self.res_blocks = nn.ModuleList()
 
-    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-        - x: (bs, c, L)
-        - cond_embed: (bs, cond_dim)
-        """
-        # Pass through residual blocks
-        for block in self.res_blocks:
-            x = block(x, cond_embed)
-
-        # Pass through MBConv blocks
-        for mbconv in self.mbconv_blocks:
-            x = mbconv(x, cond_embed)
-
-        return x
+        # Add MBConv layers after the residual layers
+        for _ in range(num_mbconv_layers):
+            self.res_blocks.append(
+                MBConv(
+                    channels,
+                    channels,
+                    cond_dim,
+                    expansion_factor,
+                    kernel_size,
+                )
+            )
 
 
 class HAMidcoder(Midcoder1D):
@@ -132,7 +116,7 @@ class TFiLMMidcoder(nn.Module):
         super().__init__()
         self.res_blocks = nn.ModuleList(
             [
-                ResidualBlock(channels, cond_dim=cond_dim, use_1d=True)
+                ResidualBlock(channels, channels, cond_dim)
                 for _ in range(num_residual_layers)
             ]
         )
@@ -152,9 +136,7 @@ class TFiLMMidcoder(nn.Module):
         # Pass through residual blocks: (bs, c, L) -> (bs, c, L)
         for block in self.res_blocks:
             x = block(x, cond=cond_embed)
-
-        # Apply TFiLM: (bs, c, L) -> (bs, c, L)
-        x = self.tfilm(x, cond=cond_embed)
+            x = self.tfilm(x, cond=cond_embed)
 
         return x
 
@@ -171,7 +153,6 @@ class TransFiLMMidcoder(TFiLMMidcoder):
         cond_dim: int,
         num_tfilm_blocks: int,
         number_transformer_heads: int,
-        num_transformer_layers: int,
         ffn_dim_multiplier: int,
     ):
         super().__init__(
@@ -188,7 +169,7 @@ class TransFiLMMidcoder(TFiLMMidcoder):
             num_tfilm_blocks,
             channels,
             number_transformer_heads,
-            num_transformer_layers,
+            1,
             ffn_dim_multiplier,
         )
 

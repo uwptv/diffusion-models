@@ -123,13 +123,21 @@ class WaveSampler(nn.Module, Sampleable):
 
     def get_mean_std(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """Return the precomputed mean and std tensors."""
-        return self.mean, self.std
+        mean = self.mean.to(self.dummy.device)
+        std = self.std.to(self.dummy.device)
+        return mean, std
 
     def normalize(self, waves: torch.Tensor) -> torch.Tensor:
-        return (waves - self.mean) / self.std
+        """Normalize waves using precomputed mean and std."""
+        mean = self.mean.to(waves.device)
+        std = self.std.to(waves.device)
+        return (waves - mean) / std
 
     def denormalize(self, waves: torch.Tensor) -> torch.Tensor:
-        return waves * self.std + self.mean
+        """Denormalize waves using precomputed mean and std."""
+        mean = self.mean.to(waves.device)
+        std = self.std.to(waves.device)
+        return waves * std + mean
 
     def sample(
         self,

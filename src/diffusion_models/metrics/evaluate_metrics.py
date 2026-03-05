@@ -8,6 +8,8 @@ from .fid import compute_fid
 from .improved_pr import compute_pr
 from .kid import compute_kid
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 def compute_all_metrics(
     model: torch.nn.Module,
@@ -31,6 +33,10 @@ def compute_all_metrics(
         Keys: fid_gs2.0_class_1, fid_gs2.0_class_2, ..., fid_gs2.0_avg,
               fid_gs3.0_class_1, ..., fid_gs3.0_avg
     """
+    # Ensure model is in eval mode and on correct device
+    model.eval()
+    model.to(device)
+
     with torch.no_grad():
         guidance_real_data = []
         guidance_generated_data = []

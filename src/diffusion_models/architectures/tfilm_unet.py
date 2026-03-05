@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-from .blocks.base import InitialConvolution
+from .blocks.base import AdaGroupNorm
 from .blocks.decoders import TFiLMDecoder, TransFiLMDecoder
 from .blocks.encoders import TFiLMEncoder, TransFiLMEncoder
 from .blocks.midcoders import (
@@ -29,8 +29,8 @@ class TFiLMUNet(UNet):
         num_layers_rnn: int,
     ):
         super().__init__(cond_dim, num_classes)
-        self.init_conv = InitialConvolution(
-            input_channels, initial_channels, cond_dim, use_1d=True
+        self.init_conv = nn.Conv1d(
+            input_channels, initial_channels, kernel_size=3, padding=1
         )
 
         # Double channels every level
@@ -55,7 +55,7 @@ class TFiLMUNet(UNet):
             )
             decoders.append(
                 TFiLMDecoder(
-                    next_c,
+                    2 * next_c,
                     curr_c,
                     upsampling_method,
                     num_residual_layers,
@@ -76,8 +76,10 @@ class TFiLMUNet(UNet):
             hidden_size_rnn,
             num_layers_rnn,
         )
-        self.final_conv = nn.Conv1d(
-            initial_channels, input_channels, kernel_size=3, padding=1
+        self.final_conv = nn.Sequential(
+            AdaGroupNorm(num_channels=initial_channels, cond_dim=cond_dim),
+            nn.SiLU(),
+            nn.Conv1d(initial_channels, input_channels, kernel_size=3, padding=1),
         )
 
 
@@ -97,12 +99,11 @@ class TFiLMUNetTransformer(UNet):
         cond_dim: int,
         num_tfilm_blocks: int,
         num_transformer_heads: int,
-        num_transformer_layers: int,
         ffn_dim_multiplier: int,
     ):
         super().__init__(cond_dim, num_classes)
-        self.init_conv = InitialConvolution(
-            input_channels, initial_channels, cond_dim, use_1d=True
+        self.init_conv = nn.Conv1d(
+            input_channels, initial_channels, kernel_size=3, padding=1
         )
 
         # Double channels every level
@@ -122,7 +123,6 @@ class TFiLMUNetTransformer(UNet):
                     cond_dim,
                     num_tfilm_blocks,
                     num_transformer_heads,
-                    num_transformer_layers,
                     ffn_dim_multiplier,
                 )
             )
@@ -135,7 +135,6 @@ class TFiLMUNetTransformer(UNet):
                     cond_dim,
                     num_tfilm_blocks,
                     num_transformer_heads,
-                    num_transformer_layers,
                     ffn_dim_multiplier,
                 )
             )
@@ -148,9 +147,10 @@ class TFiLMUNetTransformer(UNet):
             cond_dim,
             num_tfilm_blocks,
             num_transformer_heads,
-            num_transformer_layers,
             ffn_dim_multiplier,
         )
-        self.final_conv = nn.Conv1d(
-            channels[0], input_channels, kernel_size=3, padding=1
+        self.final_conv = nn.Sequential(
+            AdaGroupNorm(num_channels=channels[0], cond_dim=cond_dim),
+            nn.SiLU(),
+            nn.Conv1d(channels[0], input_channels, kernel_size=3, padding=1),
         )

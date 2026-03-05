@@ -508,6 +508,12 @@ class CBAM(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (B, C, L)
+        Returns:
+        - out: (B, C, L)
+        """
         residual = x
 
         # 1. Channel Attention
@@ -545,30 +551,32 @@ class MBConv(nn.Module):
         cond_dim: int,
         expansion_factor: int,
         kernel_size: int,
-        stride: int,
     ):
         super().__init__()
         hidden_dim = channels_in * expansion_factor
         padding = kernel_size // 2
 
+        # Convolutions
         self.expand_conv = nn.Conv1d(channels_in, hidden_dim, kernel_size=1)
         self.depthwise_conv = nn.Conv1d(
             hidden_dim,
             hidden_dim,
             kernel_size=kernel_size,
-            stride=stride,
             padding=padding,
             groups=hidden_dim,
         )
         self.project_conv = nn.Conv1d(hidden_dim, channels_out, kernel_size=1)
-        self.norm_expand = AdaGroupNorm(num_channels=hidden_dim, cond_dim=cond_dim)
+
+        # Normalizations
+        self.norm_expand = AdaGroupNorm(num_channels=channels_in, cond_dim=cond_dim)
         self.norm_depthwise = AdaGroupNorm(num_channels=hidden_dim, cond_dim=cond_dim)
         self.norm_project = AdaGroupNorm(
-            num_channels=channels_out,
+            num_channels=hidden_dim,
             cond_dim=cond_dim,
         )
+
         self.activation = nn.ReLU6()
-        self.use_residual = (channels_in == channels_out) and (stride == 1)
+        self.use_residual = channels_in == channels_out
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         """
@@ -580,21 +588,19 @@ class MBConv(nn.Module):
         """
         residual = x
 
+        x = self.norm_expand(x, cond)
+        x = self.activation(x)
         x = self.expand_conv(x)  # (B, hidden_dim, L)
-        x = self.norm_expand(x, cond)  # (B, hidden_dim, L)
-        x = self.activation(x)
 
-        x = self.depthwise_conv(x)  # (B, hidden_dim, L_out)
-        x = self.norm_depthwise(x, cond)  # (B, hidden_dim, L_out)
+        x = self.norm_depthwise(x, cond)
         x = self.activation(x)
+        x = self.depthwise_conv(x)  # (B, hidden_dim, L)
 
-        x = self.project_conv(x)  # (B, channels_out, L_out)
-        x = self.norm_project(x, cond)  # (B, channels_out, L_out)
+        x = self.norm_project(x, cond)  # (B, channels_out, L)
+        x = self.project_conv(x)  # (B, channels_out, L)
 
         if self.use_residual:
-            x = (
-                x + residual
-            )  # (B, channels_out, L_out), L_out is L in that case and channels_out == channels_in
+            x = x + residual  # (B, channels_out, L)
 
         return x
 

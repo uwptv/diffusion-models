@@ -40,9 +40,9 @@ class Decoder1D(nn.Module):
         """
         Args:
         - x: (bs, c_in // 2, L)
-        - skip: (bs, c_in // 2, L)
+        - skip: (bs, c_in // 2, 2 * L)
         - cond_embed: (bs, cond_dim)
-        Returns:#
+        Returns:
         - x: (bs, c_out, 2*L)
         """
         x = self.upsample(x)  # (bs, c_in // 2, 2*L)
@@ -65,32 +65,34 @@ class CBAMDecoder(Decoder1D):
         cond_dim: int,
         cbam_reduction_ratio: int,
         cbam_kernel_size: int,
-        activation: str = "silu",
     ):
         super().__init__(
-            channels_in, channels_out, method, num_residual_layers, cond_dim, activation
+            channels_in,
+            channels_out,
+            method,
+            num_residual_layers,
+            cond_dim,
         )
         self.cbam = CBAM(channels_out, cbam_reduction_ratio, cbam_kernel_size)
 
-    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, skip: torch.Tensor, cond_embed: torch.Tensor
+    ) -> torch.Tensor:
         """
         Args:
-        - x: (bs, c_in, L)
+        - x: (bs, c_in // 2, L)
+        - skip: (bs, c_in // 2, 2 * L)
         - cond_embed: (bs, cond_dim)
+        Returns:
+        - x: (bs, c_out, 2*L)
         """
-        # Upsample: (bs, c_in, L) -> (bs, c_out, 2*L)
-        x = self.upsample(x)
-        x = self.norm(x, cond_embed)
-        x = self.activation(x)
+        x = self.upsample(x)  # (bs, c_in // 2, 2*L)
+        x = torch.cat([x, skip], dim=1)  # (bs, c_in, 2 *L)
 
-        # Refine the upsampled features
-        x = self.cbam(x)
-        x = self.norm(x, cond_embed)
-        x = self.activation(x)
-
-        # Pass through residual blocks: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
         for block in self.res_blocks:
             x = block(x, cond_embed)
+            # Apply CBAM after each residual block
+            x = self.cbam(x)
 
         return x
 
@@ -101,56 +103,48 @@ class MBConvDecoder(Decoder1D):
         channels_in: int,
         channels_out: int,
         upsampling_method: str,
-        num_residual_layers: int,
         cond_dim: int,
         num_mbconv_layers: int,
         expansion_factor: int,
         kernel_size: int,
-        activation: str = "silu",
     ):
-        super().__init__(
-            channels_in,
-            channels_out,
-            upsampling_method,
-            num_residual_layers,
-            cond_dim,
-            activation,
-        )
-        self.mbconv_stack = nn.ModuleList(
-            MBConv(
-                channels_in=channels_out,
-                channels_out=channels_out,
-                cond_dim=cond_dim,
-                expansion_factor=expansion_factor,
-                kernel_size=kernel_size,
-                stride=1,
-            )
-            for _ in range(num_mbconv_layers)
+        self.mbconv_blocks = nn.ModuleList()
+
+        self.mbconv_blocks.append(
+            MBConv(channels_in, channels_out, cond_dim, expansion_factor, kernel_size)
         )
 
-    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+        for _ in range(num_mbconv_layers - 1):
+            self.mbconv_blocks.append(
+                MBConv(
+                    channels_out, channels_out, cond_dim, expansion_factor, kernel_size
+                )
+            )
+
+        upsample_method = get_upsampling(upsampling_method)
+        self.upsample = upsample_method(channels_in // 2)
+
+    def forward(
+        self, x: torch.Tensor, skip: torch.Tensor, cond_embed: torch.Tensor
+    ) -> torch.Tensor:
         """
         Args:
-        - x: (bs, c_in, L)
+        - x: (bs, c_in // 2, L)
+        - skip: (bs, c_in // 2, 2 * L)
         - cond_embed: (bs, cond_dim)
+        Returns:
+        - x: (bs, c_out, 2*L)
         """
-        # Upsample, Normalize, Activate
-        x = self.upsample(x)
-        x = self.norm(x, cond_embed)
-        x = self.activation(x)
+        x = self.upsample(x)  # (bs, c_in // 2, 2*L)
+        x = torch.cat([x, skip], dim=1)  # (bs, c_in, 2 *L)
 
-        # Pass through MBConv layers
-        for mbconv in self.mbconv_stack:
-            x = mbconv(x, cond=cond_embed)
-
-        # Pass through residual blocks
-        for block in self.res_blocks:
+        for block in self.mbconv_blocks:
             x = block(x, cond_embed)
 
         return x
 
 
-class TFiLMDecoder(nn.Module):
+class TFiLMDecoder(Decoder1D):
     def __init__(
         self,
         channels_in: int,
@@ -163,17 +157,12 @@ class TFiLMDecoder(nn.Module):
         num_layers_rnn: int,
         activation: str = "silu",
     ):
-        super().__init__()
-        upsampling_method = get_upsampling(method)
-        self.upsample = upsampling_method(channels_in, channels_out)
-        self.norm = AdaGroupNorm(num_channels=channels_out, cond_dim=cond_dim)
-        self.activation = get_activation(activation)
-
-        self.res_blocks = nn.ModuleList(
-            [
-                ResidualBlock(channels_out, cond_dim=cond_dim, use_1d=True)
-                for _ in range(num_residual_layers)
-            ]
+        super().__init__(
+            channels_in,
+            channels_out,
+            method,
+            num_residual_layers,
+            cond_dim,
         )
         self.tfilm = TFiLM(
             num_blocks=num_tfilm_blocks,
@@ -181,34 +170,27 @@ class TFiLMDecoder(nn.Module):
             rnn_hidden=hidden_size_rnn,
             rnn_layers=num_layers_rnn,
         )
-        self.refinement = nn.Conv1d(
-            channels_out, channels_out, kernel_size=3, padding=1
-        )
 
-    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, skip: torch.Tensor, cond_embed: torch.Tensor
+    ) -> torch.Tensor:
         """
         Args:
-        - x: (bs, c_in, L)
+        - x: (bs, c_in // 2, L)
+        - skip: (bs, c_in // 2, 2 * L)
         - cond_embed: (bs, cond_dim)
         Returns:
         - x: (bs, c_out, 2*L)
         """
-        # Upsample: (bs, c_in, L) -> (bs, c_out, 2*L)
+        # Upsample: (bs, c_in // 2, L) -> (bs, c_in // 2, 2*L)
         x = self.upsample(x)
-        x = self.norm(x, cond_embed)
-        x = self.activation(x)
+        x = torch.cat([x, skip], dim=1)  # (bs, c_in, 2 *L)
 
-        # Refine the upsampled features
-        x = self.refinement(x)
-        x = self.norm(x, cond_embed)
-        x = self.activation(x)
-
-        # Apply TFiLM: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
-        x = self.tfilm(x, cond_embed)
-
-        # Pass through residual blocks: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
+        # Pass through residual blocks: (bs, c_in, 2 * L) -> (bs, c_out, 2 * L)
         for block in self.res_blocks:
             x = block(x, cond_embed)
+            # Apply TFiLM after each residual block
+            x = self.tfilm(x, cond_embed)
 
         return x
 
@@ -223,7 +205,6 @@ class TransFiLMDecoder(TFiLMDecoder):
         cond_dim: int,
         num_tfilm_blocks: int,
         num_transformer_heads: int,
-        num_transformer_layers: int,
         ffn_dim_multiplier: int,
         activation: str = "silu",
     ):
@@ -244,7 +225,7 @@ class TransFiLMDecoder(TFiLMDecoder):
             channels=channels_out,
             num_blocks=num_tfilm_blocks,
             num_heads=num_transformer_heads,
-            num_layers=num_transformer_layers,
+            num_layers=1,
             ffn_dim_multiplier=ffn_dim_multiplier,
         )
 

@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-from diffusion_models.architectures.blocks.base import InitialConvolution
+from diffusion_models.architectures.blocks.base import AdaGroupNorm
 from diffusion_models.architectures.blocks.decoders import MBConvDecoder
 from diffusion_models.architectures.blocks.encoders import MBConvEncoder
 from diffusion_models.architectures.blocks.midcoders import MBConvMidcoder
@@ -14,7 +14,6 @@ class MBConvUNet(UNet):
         initial_channels: int,
         levels: int,
         upsampling_method: str,
-        num_residual_layers: int,
         num_classes: int,
         cond_dim: int,
         num_mbconv_layers: int,
@@ -23,8 +22,8 @@ class MBConvUNet(UNet):
     ):
         super().__init__(cond_dim, num_classes)
 
-        self.init_conv = InitialConvolution(
-            input_channels, initial_channels, cond_dim=cond_dim, use_1d=True
+        self.init_conv = nn.Conv1d(
+            input_channels, initial_channels, kernel_size=3, padding=1
         )
 
         channels = [initial_channels]
@@ -40,7 +39,6 @@ class MBConvUNet(UNet):
                 MBConvEncoder(
                     curr_c,
                     next_c,
-                    num_residual_layers,
                     cond_dim,
                     num_mbconv_layers,
                     expansion_factor,
@@ -49,10 +47,9 @@ class MBConvUNet(UNet):
             )
             decoders.append(
                 MBConvDecoder(
-                    next_c,
+                    2 * next_c,
                     curr_c,
                     upsampling_method,
-                    num_residual_layers,
                     cond_dim,
                     num_mbconv_layers,
                     expansion_factor,
@@ -64,12 +61,13 @@ class MBConvUNet(UNet):
 
         self.midcoder = MBConvMidcoder(
             channels[-1],
-            num_residual_layers,
             cond_dim,
             num_mbconv_layers,
             expansion_factor,
             kernel_size,
         )
-        self.final_conv = nn.Conv1d(
-            channels[0], input_channels, kernel_size=3, padding=1
+        self.final_conv = nn.Sequential(
+            AdaGroupNorm(num_channels=initial_channels, cond_dim=cond_dim),
+            nn.SiLU(),
+            nn.Conv1d(initial_channels, input_channels, kernel_size=3, padding=1),
         )
