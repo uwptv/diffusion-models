@@ -31,7 +31,6 @@ class TUNet(TFiLMUNet):
         hidden_size_rnn: int,
         num_layers_rnn: int,
         num_heads: int,
-        num_transformer_layers: int,
         ffn_expansion_factor: int,
     ):
         super().__init__(
@@ -51,7 +50,7 @@ class TUNet(TFiLMUNet):
             num_residual_layers=num_residual_layers,
             cond_dim=cond_dim,
             num_heads=num_heads,
-            num_transformer_layers=num_transformer_layers,
+            num_transformer_layers=1,
             ffn_expansion_factor=ffn_expansion_factor,
         )
 
@@ -74,7 +73,6 @@ class SeperableTUNet(TUNet):
         hidden_size_rnn: int,
         num_layers_rnn: int,
         num_heads: int,
-        num_transformer_layers: int,
         ffn_expansion_factor: int,
         filters_per_channel: int,
     ):
@@ -90,7 +88,6 @@ class SeperableTUNet(TUNet):
             hidden_size_rnn,
             num_layers_rnn,
             num_heads,
-            num_transformer_layers,
             ffn_expansion_factor,
         )
         self.init_conv = SeperableConv1D(
@@ -98,7 +95,6 @@ class SeperableTUNet(TUNet):
             initial_channels,
             cond_dim,
             filters_per_channel,
-            stride=1,
         )
 
         # Double channels every level
@@ -123,7 +119,7 @@ class SeperableTUNet(TUNet):
             )
             decoders.append(
                 SeperableTFiLMDecoder(
-                    next_c,
+                    2 * next_c,
                     curr_c,
                     upsampling_method,
                     num_residual_layers,
@@ -136,7 +132,3 @@ class SeperableTUNet(TUNet):
             )
         self.encoders = nn.ModuleList(encoders)
         self.decoders = nn.ModuleList(reversed(decoders))
-
-        self.final_conv = nn.Conv1d(
-            initial_channels, input_channels, kernel_size=3, padding=1
-        )

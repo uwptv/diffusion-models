@@ -146,24 +146,77 @@ class ResidualBlock(nn.Module):
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         """
         Args:
-        - x: (bs, c, L) for 1D
+        - x: (bs, channels_in, L) for 1D
         - cond: (bs, cond_dim)
         Returns:
-        - output: same shape as x
+        - output: (bs, channels_out, L)
         """
-        res = x  # (bs, c_in, L)
+        res = x  # (bs, channels_in, L)
         x = self.norm1(x, cond)
         x = self.activation(x)
-        x = self.conv1(x)  # (bs, c_out, L)
+        x = self.conv1(x)  # (bs, channels_out, L)
 
-        cond_adapted = self.cond_adapter(cond)  # (bs, c_out)
+        cond_adapted = self.cond_adapter(cond)  # (bs, channels_out)
         for _ in range(x.ndim - 2):
-            cond_adapted = cond_adapted.unsqueeze(-1)  # (bs, c_out, 1, ..., 1)
+            cond_adapted = cond_adapted.unsqueeze(-1)  # (bs, channels_out, 1, ..., 1)
         x = x + cond_adapted
 
         x = self.norm2(x, cond)
         x = self.activation(x)
         x = self.conv2(x)
+
+        x = x + self.res_conv(res)
+        return x
+
+
+class SeperableResidualBlock(nn.Module):
+    def __init__(
+        self,
+        channels_in: int,
+        channels_out: int,
+        cond_dim: int,
+        filters_per_channel: int,
+    ):
+        super().__init__()
+        self.res_conv = (
+            nn.Conv1d(channels_in, channels_out, kernel_size=1)
+            if channels_in != channels_out
+            else nn.Identity()
+        )
+
+        self.norm1 = AdaGroupNorm(num_channels=channels_in, cond_dim=cond_dim)
+        self.norm2 = AdaGroupNorm(num_channels=channels_out, cond_dim=cond_dim)
+
+        self.cond_adapter = nn.Sequential(
+            nn.Linear(cond_dim, cond_dim),
+            self.activation,
+            nn.Linear(cond_dim, channels_out),
+        )
+
+        self.conv1 = SeperableConv1D(
+            channels_in, channels_out, cond_dim, filters_per_channel
+        )
+        self.conv2 = SeperableConv1D(
+            channels_out, channels_out, cond_dim, filters_per_channel
+        )
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, channels_in, L) for 1D
+        - cond: (bs, cond_dim)
+        Returns:
+        - output: (bs, channels_out, L)
+        """
+        res = x  # (bs, channels_in, L)
+        x = self.conv1(x, cond)  # (bs, channels_out, L)
+
+        cond_adapted = self.cond_adapter(cond)  # (bs, channels_out)
+        for _ in range(x.ndim - 2):
+            cond_adapted = cond_adapted.unsqueeze(-1)  # (bs, channels_out, 1, ..., 1)
+        x = x + cond_adapted
+
+        x = self.conv2(x, cond)  # (bs, channels_out, L)
 
         x = x + self.res_conv(res)
         return x
@@ -367,26 +420,23 @@ class SeperableConv1D(nn.Module):
         channels_out: int,
         cond_dim: int,
         filters_per_channel: int,
-        stride: int,
-        padding: int = 1,
     ):
         super().__init__()
         self.depthwise = nn.Conv1d(
             channels_in,
             filters_per_channel * channels_in,
             kernel_size=3,
-            stride=stride,
-            padding=padding,
+            padding=1,
             groups=channels_in,
         )
         self.pointwise = nn.Conv1d(
             filters_per_channel * channels_in, channels_out, kernel_size=1
         )
         self.activation = nn.SiLU()
-        self.norm1 = AdaGroupNorm(
+        self.norm1 = AdaGroupNorm(num_channels=channels_in, cond_dim=cond_dim)
+        self.norm2 = AdaGroupNorm(
             num_channels=filters_per_channel * channels_in, cond_dim=cond_dim
         )
-        self.norm2 = AdaGroupNorm(num_channels=channels_out, cond_dim=cond_dim)
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         """
@@ -395,14 +445,14 @@ class SeperableConv1D(nn.Module):
         - cond: (bs, cond_dim)
         """
         # Depthwise convolution
+        x = self.norm1(x, cond)  # (bs, c_in, L)
+        x = self.activation(x)  # (bs, c_in, L)
         x = self.depthwise(x)  # (bs, filters_per_channel * c_in, L)
-        x = self.norm1(x, cond)  # (bs, filters_per_channel * c_in, L)
-        x = self.activation(x)  # (bs, filters_per_channel * c_in, L)
 
         # Pointwise convolution
+        x = self.norm2(x, cond)  # (bs, filters_per_channel * c_in, L)
+        x = self.activation(x)  # (bs, filters_per_channel * c_in, L)
         x = self.pointwise(x)  # (bs, c_out, L)
-        x = self.norm2(x, cond)  # (bs, c_out, L)
-        x = self.activation(x)  # (bs, c_out, L)
 
         return x
 

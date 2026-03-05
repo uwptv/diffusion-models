@@ -8,7 +8,7 @@ from diffusion_models.architectures.blocks.base import (
     HAResidualLayer,
     MBConv,
     ResidualBlock,
-    SeperableConv1D,
+    SeperableResidualBlock,
     get_activation,
     get_upsampling,
 )
@@ -249,40 +249,21 @@ class SeperableTFiLMDecoder(TFiLMDecoder):
             hidden_size_rnn,
             num_layers_rnn,
         )
-        self.refinement = SeperableConv1D(
-            channels_out,
-            channels_out,
-            cond_dim,
-            filters_per_channel,
-            stride=1,
+        self.res_blocks = nn.ModuleList()
+
+        # First residual block expands channels: channels_in -> channels_out
+        self.res_blocks.append(
+            SeperableResidualBlock(
+                channels_in, channels_out, cond_dim, filters_per_channel
+            )
         )
 
-    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-        - x: (bs, c_in, L)
-        - cond_embed: (bs, cond_dim)
-        Returns:
-        - x: (bs, c_out, 2*L)
-        """
-        # Upsample: (bs, c_in, L) -> (bs, c_out, 2*L)
-        x = self.upsample(x)
-        x = self.norm(x, cond_embed)
-        x = self.activation(x)
-
-        # Refine the upsampled features with separable convolution
-        x = self.refinement(x, cond_embed)
-        x = self.norm(x, cond_embed)
-        x = self.activation(x)
-
-        # Apply TFiLM: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
-        x = self.tfilm(x, cond_embed)
-
-        # Pass through residual blocks: (bs, c_out, 2*L) -> (bs, c_out, 2*L)
-        for block in self.res_blocks:
-            x = block(x, cond_embed)
-
-        return x
+        for _ in range(num_residual_layers - 1):
+            self.res_blocks.append(
+                SeperableResidualBlock(
+                    channels_out, channels_out, cond_dim, filters_per_channel
+                )
+            )
 
 
 class HADecoder(nn.Module):

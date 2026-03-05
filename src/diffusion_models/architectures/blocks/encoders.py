@@ -8,7 +8,7 @@ from diffusion_models.architectures.blocks.base import (
     HAResidualLayer,
     MBConv,
     ResidualBlock,
-    SeperableConv1D,
+    SeperableResidualBlock,
     get_activation,
 )
 from diffusion_models.architectures.blocks.tfilm import TFiLM, TFiLMTransformer
@@ -236,7 +236,6 @@ class SeperableTFiLMEncoder(TFiLMEncoder):
         hidden_size_rnn: int,
         num_layers_rnn: int,
         filters_per_channel: int,
-        activation: str = "silu",
     ):
         super().__init__(
             channels_in,
@@ -246,37 +245,27 @@ class SeperableTFiLMEncoder(TFiLMEncoder):
             num_tfilm_blocks,
             hidden_size_rnn,
             num_layers_rnn,
-            activation,
         )
-        # Replace downsample with SeperableConv1D
-        self.downsample = SeperableConv1D(
-            channels_in,
-            channels_out,
-            cond_dim,
-            filters_per_channel,
-            stride=2,
+        self.res_blocks = nn.ModuleList()
+
+        # First residual block expands channels: channels_in -> channels_out
+        self.res_blocks.append(
+            SeperableResidualBlock(
+                channels_in, channels_out, cond_dim, filters_per_channel, stride=1
+            )
         )
-        self.activation = (
-            nn.Identity()
-        )  # Remove activation here since SeperableConv1D already has it
 
-    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-        - x: (bs, c_in, L)
-        - cond_embed: (bs, cond_dim)
-        """
-        # Pass through residual blocks: (bs, c_in, L) -> (bs, c_in, L)
-        for block in self.res_blocks:
-            x = block(x, cond=cond_embed)
-
-        # Downsample using SeperableConv1D: (bs, c_in, L) -> (bs, c_out, L // 2)
-        x = self.downsample(x, cond_embed)
-
-        # Apply TFiLM: (bs, c_out, L // 2) -> (bs, c_out, L // 2)
-        x = self.tfilm(x, cond_embed)
-
-        return x
+        # Remaining blocks keep channels fixed: channels_out -> channels_out
+        for _ in range(num_residual_layers - 1):
+            self.res_blocks.append(
+                SeperableResidualBlock(
+                    channels_out,
+                    channels_out,
+                    cond_dim,
+                    filters_per_channel,
+                    stride=1,
+                )
+            )
 
 
 class HAEncoder(nn.Module):
