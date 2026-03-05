@@ -149,7 +149,6 @@ class TFiLMEncoder(nn.Module):
         num_tfilm_blocks: int,
         hidden_size_rnn: int,
         num_layers_rnn: int,
-        activation: str = "silu",
     ):
         super().__init__()
         self.res_blocks = nn.ModuleList()
@@ -166,7 +165,7 @@ class TFiLMEncoder(nn.Module):
             rnn_layers=num_layers_rnn,
         )
         self.downsample = nn.Conv1d(
-            channels_in,
+            channels_out,
             channels_out,
             kernel_size=3,
             stride=2,
@@ -178,17 +177,22 @@ class TFiLMEncoder(nn.Module):
         Args:
         - x: (bs, c_in, L)
         - cond_embed: (bs, cond_dim)
+        Returns:
+        - x: (bs, c_out, L // 2)
+        - skip: (bs, c_out, L)
         """
-        # Pass through residual blocks: (bs, c_in, L) -> (bs, c_in, L)
+        # Pass through residual blocks: (bs, c_in, L) -> (bs, c_out, L)
         for block in self.res_blocks:
             x = block(x, cond=cond_embed)
             # Enhance features with TFiLM after each residual block
             x = self.tfilm(x, cond_embed)
 
+        skip = x.clone()  # (bs, c_out, L)
+
         # Downsample: (bs, c_in, L) -> (bs, c_out, L // 2)
         x = self.downsample(x)
 
-        return x
+        return x, skip
 
 
 class TransFiLMEncoder(TFiLMEncoder):
@@ -201,7 +205,6 @@ class TransFiLMEncoder(TFiLMEncoder):
         num_tfilm_blocks: int,
         num_transformer_heads: int,
         ffn_dim_multiplier: int,
-        activation: str = "silu",
     ):
         super().__init__(
             channels_in,
@@ -211,7 +214,6 @@ class TransFiLMEncoder(TFiLMEncoder):
             num_tfilm_blocks,
             64,  # Use dummy values for RNN params since they won't be used in this variant
             1,
-            activation,
         )
         # Replace TFiLM mechanism with Transformer Mechanism
         self.tfilm = TFiLMTransformer(

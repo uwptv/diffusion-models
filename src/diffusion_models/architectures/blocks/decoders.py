@@ -155,7 +155,6 @@ class TFiLMDecoder(Decoder1D):
         num_tfilm_blocks: int,
         hidden_size_rnn: int,
         num_layers_rnn: int,
-        activation: str = "silu",
     ):
         super().__init__(
             channels_in,
@@ -206,7 +205,6 @@ class TransFiLMDecoder(TFiLMDecoder):
         num_tfilm_blocks: int,
         num_transformer_heads: int,
         ffn_dim_multiplier: int,
-        activation: str = "silu",
     ):
         super().__init__(
             channels_in,
@@ -217,7 +215,6 @@ class TransFiLMDecoder(TFiLMDecoder):
             num_tfilm_blocks,
             64,  # Use dummy values for RNN params since they won't be used in this variant
             1,
-            activation,
         )
         # Replace TFiLM mechanism with Transformer Mechanism
         self.tfilm = TFiLMTransformer(
