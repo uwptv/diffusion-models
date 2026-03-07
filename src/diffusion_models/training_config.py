@@ -67,6 +67,13 @@ def run_objective_trial(
     path,
     device: torch.device,
 ) -> float:
+    trainer = None
+    model = None
+
+    # Avoid cross-trial CUDA fragmentation/state buildup when running many Optuna trials.
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     params = suggest_params(trial)
     params_key = stable_params_key(params)
     if params_key in seen_configs:
@@ -109,31 +116,40 @@ def run_objective_trial(
             mlflow.set_tag("status", "pruned_due_to_flops")
         raise optuna.TrialPruned(f"Model too large: {giga_flops:.3f} GFLOPs")
 
-    with mlflow.start_run(run_name=f"trial_{trial.number}", nested=True):
-        mlflow.log_params(params)
-        mlflow.log_param("model_size_MiB", f"{model_size:.2f}")
-        mlflow.log_param("flops_giga", f"{giga_flops:.5f}")
+    try:
+        with mlflow.start_run(run_name=f"trial_{trial.number}", nested=True):
+            mlflow.log_params(params)
+            mlflow.log_param("model_size_MiB", f"{model_size:.2f}")
+            mlflow.log_param("flops_giga", f"{giga_flops:.5f}")
 
-        try:
-            path.p_data.reset_generator()
-            run_id, val_loss = trainer.train(
-                num_epochs=cfg.max_num_epochs,
-                device=device,
-                lr=lr,
-                batch_size=cfg.batch_size,
-            )
-            mlflow.log_metric("val_loss", val_loss, run_id=run_id)
-            return val_loss
-        except optuna.TrialPruned:
-            mlflow.set_tag("status", "pruned_during_training")
-            mlflow.end_run(status="KILLED")
-            raise optuna.TrialPruned(
-                "Trial pruned during training due to early stopping"
-            )
-        except Exception as e:
-            mlflow.log_param("exception", str(e))
-            mlflow.end_run(status="FAILED")
-            raise e
+            try:
+                if hasattr(path.p_data, "reset_generator"):
+                    path.p_data.reset_generator()
+
+                run_id, val_loss = trainer.train(
+                    num_epochs=cfg.max_num_epochs,
+                    device=device,
+                    lr=lr,
+                    batch_size=cfg.batch_size,
+                )
+                mlflow.log_metric("val_loss", val_loss, run_id=run_id)
+                return val_loss
+            except optuna.TrialPruned:
+                mlflow.set_tag("status", "pruned_during_training")
+                mlflow.end_run(status="KILLED")
+                raise optuna.TrialPruned(
+                    "Trial pruned during training due to early stopping"
+                )
+            except Exception as e:
+                mlflow.log_param("exception", str(e))
+                mlflow.end_run(status="FAILED")
+                raise e
+    finally:
+        # Explicitly release model/trainer references and cached CUDA memory between trials.
+        del trainer
+        del model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
 def retrain_best_model(

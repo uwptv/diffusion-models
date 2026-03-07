@@ -70,6 +70,43 @@ class TFiLM(nn.Module):
         return out
 
 
+class HATFiLM(TFiLM):
+    def __init__(
+        self, num_blocks: int, channels: int, rnn_hidden: int, rnn_layers: int = 1
+    ):
+        super().__init__()
+        self.channels = channels
+        self.num_blocks = num_blocks
+        self.rnn_hidden = rnn_hidden
+        self.rnn_layers = rnn_layers
+        self.rnn = nn.LSTM(
+            input_size=channels,
+            hidden_size=self.rnn_hidden,
+            num_layers=self.rnn_layers,
+            batch_first=True,
+            bidirectional=True,
+        )
+        self.to_params = nn.Linear(2 * self.rnn_hidden, 2 * channels)
+
+    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (B *  C, features, L)
+        - cond: (B, cond_dim)
+        Returns:
+        - out: (B, C, features, T) with TFiLM applied
+        """
+        _, features, T = x.shape
+        x = super.forward(
+            x, cond.repeat_interleave(self.channels, dim=0)
+        )  # (bs * channels, features, L)
+
+        # Reshape back to (B, C, T, features)
+        x = x.reshape(-1, self.channels, features, T)  # (B, C, features, T)
+
+        return x
+
+
 class TFiLMTransformer(nn.Module):
     def __init__(
         self,

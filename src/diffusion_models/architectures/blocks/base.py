@@ -189,7 +189,7 @@ class SeperableResidualBlock(nn.Module):
 
         self.cond_adapter = nn.Sequential(
             nn.Linear(cond_dim, cond_dim),
-            self.activation,
+            nn.SiLU(),
             nn.Linear(cond_dim, channels_out),
         )
 
@@ -225,38 +225,35 @@ class SeperableResidualBlock(nn.Module):
 class HAResidualLayer(ResidualBlock):
     def __init__(
         self,
-        features: int,
+        features_in: int,
+        features_out: int,
         cond_dim: int,
     ):
         super().__init__(
-            features,
+            features_in,
+            features_out,
             cond_dim,
         )
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         """
         Args:
-        - x: (bs, channels, L, features)
+        - x: (bs, channels, L, features_in)
         - cond: (bs, cond_dim)
         Returns:
-        - output: same shape as x
+        - output: (bs * channels, features_out, L)
         """
         # Merge batch and channels
         bs, channels, L, features = x.shape
         x = x.permute(0, 1, 3, 2).reshape(
             bs * channels, features, L
-        )  # (bs * channels, features, L)
+        )  # (bs * channels, features_in, L)
 
         # Expand cond to match reshaped batch size
         # (bs, cond_dim) -> (bs*channels, cond_dim)
         cond_expanded = cond.repeat_interleave(channels, dim=0)
 
-        x = super().forward(x, cond_expanded)  # (bs * channels, features, L)
-
-        # Reshape back to original format
-        x = x.reshape(bs, channels, features, L).permute(
-            0, 1, 3, 2
-        )  # (bs, channels, L, features)
+        x = super().forward(x, cond_expanded)  # (bs * channels, features_out, L)
 
         return x
 
@@ -276,85 +273,42 @@ class CrossChannelAttention(nn.Module):
 
     def __init__(
         self,
-        num_channels: int,
         feature_dim: int,
         num_heads: int,
-        num_layers: int,
-        dropout: float = 0.0,
+        ffn_expansion_factor: int,
     ):
         super().__init__()
-        self.num_channels = num_channels
-        self.feature_dim = feature_dim
         num_heads = min(
             num_heads, feature_dim
         )  # Ensure num_heads does not exceed feature_dim
-        self.num_heads = num_heads
-        self.num_layers = num_layers
 
         # MultiheadAttention operates on feature_dim (last dimension)
-        self.attention_layers = nn.ModuleList(
-            [
-                nn.MultiheadAttention(
-                    embed_dim=feature_dim,
-                    num_heads=num_heads,
-                    dropout=dropout,
-                    batch_first=True,
-                )
-                for _ in range(num_layers)
-            ]
-        )
-
-        # Layer norms for post-norm transformer
-        self.norms1 = nn.ModuleList(
-            [nn.LayerNorm(feature_dim) for _ in range(num_layers)]
-        )
-        self.norms2 = nn.ModuleList(
-            [nn.LayerNorm(feature_dim) for _ in range(num_layers)]
-        )
-
-        # Feedforward networks
-        self.ffns = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.Linear(feature_dim, 4 * feature_dim),
-                    nn.ReLU(),
-                    nn.Dropout(dropout),
-                    nn.Linear(4 * feature_dim, feature_dim),
-                    nn.Dropout(dropout),
-                )
-                for _ in range(num_layers)
-            ]
+        self.transformer = _TransformerLayer(
+            feature_dim, num_heads, ffn_expansion_factor
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            x: (B, C, L, F) - batch, channels, sequence_length, features_per_channel
+            x: (B, C, features, T) - batch, channels, sequence_length, features_per_channel
 
         Returns:
-            (B, C, L, F) - attended features
+            (B, C, T, features) - attended features
         """
-        B, C, L, F = x.shape
+        B, C, F, T = x.shape
 
         # Reshape to apply attention across channels at each time step
-        # (B, C, L, F) -> (B*L, C, F)
+        # (B, C, F, T) -> (B*T, C, F)
         # This treats each timestep independently and applies cross-channel attention
-        x_reshaped = x.permute(0, 2, 1, 3).reshape(B * L, C, F)  # (B*L, C, F)
+        x_reshaped = x.permute(0, 3, 1, 2).reshape(B * T, C, F)  # (B*T, C, F)
 
-        # Apply transformer layers
-        for attn, norm1, ffn, norm2 in zip(
-            self.attention_layers, self.norms1, self.ffns, self.norms2
-        ):
-            # Self-attention across channels (C is the sequence dimension)
-            attn_out, _ = attn(x_reshaped, x_reshaped, x_reshaped, need_weights=False)
-            x_reshaped = norm1(x_reshaped + attn_out)
+        # Apply multi-head attention
+        attn_output, _ = self.attention(
+            x_reshaped, x_reshaped, x_reshaped
+        )  # (B*T, C, F)
 
-            # Feedforward with residual
-            ffn_out = ffn(x_reshaped)
-            x_reshaped = norm2(x_reshaped + ffn_out)
-
-        # Reshape back: (B*L, C, F) -> (B, L, C, F) -> (B, C, L, F)
-        output = x_reshaped.reshape(B, L, C, F).permute(0, 2, 1, 3)
+        # Reshape back: (B*T, C, F) -> (B, T, C, F) -> (B, C, T, F)
+        output = attn_output.reshape(B, T, C, F).permute(0, 2, 1, 3)
 
         return output
 
@@ -474,14 +428,9 @@ class DepthwiseConv1DExplicit(nn.Module):
 
     def __init__(
         self,
-        channels_in: int,
-        cond_dim: int,
         filters_per_channel: int,
     ):
         super().__init__()
-        self.channels_in = channels_in
-        self.filters_per_channel = filters_per_channel
-
         # Single conv layer with shared weights for all channels
         # Processes 1 input channel -> F output channels
         self.depthwise_conv = nn.Conv1d(
@@ -490,8 +439,6 @@ class DepthwiseConv1DExplicit(nn.Module):
             kernel_size=3,
             padding=1,
         )
-        self.norm = AdaGroupNorm(num_channels=filters_per_channel, cond_dim=cond_dim)
-        self.activation = nn.SiLU()
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
@@ -510,12 +457,6 @@ class DepthwiseConv1DExplicit(nn.Module):
 
         # Apply shared convolution: (B*C, 1, L) -> (B*C, F, L_out)
         features = self.depthwise_conv(x_reshaped)
-
-        # Expand the cond_embed to match the new batch size (B*C, cond_dim)
-        cond_expanded = cond_embed.repeat_interleave(C, dim=0)
-
-        features = self.norm(features, cond_expanded)
-        features = self.activation(features)
 
         # Reshape back: (B*C, F, L_out) -> (B, C, L_out, F)
         _, F, L_out = features.shape
@@ -719,3 +660,32 @@ class PixelShuffle(nn.Module):
         out = x.view(batch_size, self.channels, seq_len * 2)
 
         return out
+
+
+class _TransformerLayer(nn.Module):
+    def __init__(self, channels, num_heads, ffn_expansion_factor):
+        super().__init__()
+        self.attention = nn.MultiheadAttention(channels, num_heads, batch_first=True)
+        self.norm1 = nn.LayerNorm(channels)
+        self.mlp = nn.Sequential(
+            nn.Linear(channels, channels * ffn_expansion_factor),
+            nn.GELU(),
+            nn.Linear(channels * ffn_expansion_factor, channels),
+        )
+        self.norm2 = nn.LayerNorm(channels)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+        - x: (bs, seq_len, channels)
+        Returns:
+        - x: (bs, seq_len, channels)
+        """
+        # Self-attention with residual
+        attn_output, _ = self.attention(x, x, x)
+        x = self.norm1(attn_output + x)
+
+        # MLP with residual
+        mlp_output = self.mlp(x)
+        x = self.norm2(mlp_output + x)
+        return x

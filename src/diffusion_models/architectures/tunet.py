@@ -1,8 +1,5 @@
 import torch.nn as nn
 
-from diffusion_models.architectures.blocks.base import (
-    SeperableConv1D,
-)
 from diffusion_models.architectures.blocks.decoders import (
     SeperableTFiLMDecoder,
 )
@@ -50,7 +47,6 @@ class TUNet(TFiLMUNet):
             num_residual_layers=num_residual_layers,
             cond_dim=cond_dim,
             num_heads=num_heads,
-            num_transformer_layers=1,
             ffn_expansion_factor=ffn_expansion_factor,
         )
 
@@ -90,13 +86,6 @@ class SeperableTUNet(TUNet):
             num_heads,
             ffn_expansion_factor,
         )
-        self.init_conv = SeperableConv1D(
-            input_channels,
-            initial_channels,
-            cond_dim,
-            filters_per_channel,
-        )
-
         # Double channels every level
         channels = [initial_channels]
         for _ in range(levels):

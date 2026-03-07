@@ -7,6 +7,7 @@ from diffusion_models.architectures.blocks.base import (
     MBConv,
     ResidualBlock,
     SinusoidalEmbedding,
+    _TransformerLayer,
 )
 from diffusion_models.architectures.blocks.tfilm import TFiLM, TFiLMTransformer
 
@@ -75,6 +76,7 @@ class MBConvMidcoder(Midcoder1D):
         expansion_factor: int,
         kernel_size: int,
     ):
+        super().__init__(channels, num_mbconv_layers, cond_dim)
         self.res_blocks = nn.ModuleList()
 
         # Add MBConv layers after the residual layers
@@ -224,19 +226,13 @@ class TransformerMidcoder(Midcoder1D):
         num_residual_layers: int,
         cond_dim: int,
         num_heads: int,
-        num_transformer_layers: int,
         ffn_expansion_factor: int,
     ):
         super().__init__(channels, num_residual_layers, cond_dim)
         self.pos_enc = SinusoidalEmbedding(channels)
 
         # Create lists for each component
-        self.transformer_layers = nn.ModuleList(
-            [
-                _TransformerLayer(channels, num_heads, ffn_expansion_factor)
-                for _ in range(num_transformer_layers)
-            ]
-        )
+        self.transformer = _TransformerLayer(channels, num_heads, ffn_expansion_factor)
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
@@ -258,33 +254,9 @@ class TransformerMidcoder(Midcoder1D):
         x = x.permute(0, 2, 1)  # (bs, L, c)
 
         # Apply transformer layers sequentially
-        for layer in self.transformer_layers:
-            x = layer(x)
+        x = self.transformer(x)  # (bs, L, c)
 
         # Permute back to (bs, c, L)
         x = x.permute(0, 2, 1)
 
-        return x
-
-
-class _TransformerLayer(nn.Module):
-    def __init__(self, channels, num_heads, ffn_expansion_factor):
-        super().__init__()
-        self.attention = nn.MultiheadAttention(channels, num_heads, batch_first=True)
-        self.norm1 = nn.LayerNorm(channels)
-        self.mlp = nn.Sequential(
-            nn.Linear(channels, channels * ffn_expansion_factor),
-            nn.GELU(),
-            nn.Linear(channels * ffn_expansion_factor, channels),
-        )
-        self.norm2 = nn.LayerNorm(channels)
-
-    def forward(self, x):
-        # Self-attention with residual
-        attn_output, _ = self.attention(x, x, x)
-        x = self.norm1(attn_output + x)
-
-        # MLP with residual
-        mlp_output = self.mlp(x)
-        x = self.norm2(mlp_output + x)
         return x

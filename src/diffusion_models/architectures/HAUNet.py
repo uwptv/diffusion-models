@@ -32,12 +32,11 @@ class HAUNet(UNet):
         hidden_size_rnn: int,
         num_layers_rnn: int,
         num_cc_heads: int,
-        num_cc_layers: int,
     ):
         super().__init__(cond_dim, num_classes)
         # initial convolution
         self.init_conv = DepthwiseConv1DExplicit(
-            input_channels, cond_dim, initial_features
+            initial_features
         )  # (bs, input_channels, L, initial_features)
 
         features = [initial_features]
@@ -60,13 +59,12 @@ class HAUNet(UNet):
                     hidden_size_rnn,
                     num_layers_rnn,
                     num_cc_heads,
-                    num_cc_layers,
                 )
             )
             decoders.append(
                 HADecoder(
                     input_channels,
-                    next_f,
+                    2 * next_f,
                     curr_f,
                     upsampling_method,
                     cond_dim,
@@ -75,7 +73,6 @@ class HAUNet(UNet):
                     hidden_size_rnn,
                     num_layers_rnn,
                     num_cc_heads,
-                    num_cc_layers,
                 )
             )
         self.encoders = nn.ModuleList(encoders)

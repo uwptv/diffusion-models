@@ -97,7 +97,7 @@ class CBAMDecoder(Decoder1D):
         return x
 
 
-class MBConvDecoder(Decoder1D):
+class MBConvDecoder(nn.Module):
     def __init__(
         self,
         channels_in: int,
@@ -108,6 +108,7 @@ class MBConvDecoder(Decoder1D):
         expansion_factor: int,
         kernel_size: int,
     ):
+        super().__init__()
         self.mbconv_blocks = nn.ModuleList()
 
         self.mbconv_blocks.append(
