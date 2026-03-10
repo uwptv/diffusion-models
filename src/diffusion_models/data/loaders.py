@@ -213,12 +213,12 @@ def visualize_wisdm_samples(
 
     # Activity mapping (adjust based on your dataset's activity classes)
     activity_names = {
-        1: "Walking",
-        2: "Jogging",
-        3: "Upstairs",
-        4: "Downstairs",
-        5: "Sitting",
-        6: "Standing",
+        0: "Walking",
+        1: "Jogging",
+        2: "Upstairs",
+        3: "Downstairs",
+        4: "Sitting",
+        5: "Standing",
     }
 
     num_plots = min(num_plots, samples.shape[0])
@@ -261,7 +261,7 @@ def visualize_wisdm_samples(
 
 
 if __name__ == "__main__":
-    samples, labels = DataSampler(dataset="uci_har").sample(10, "train")
+    samples, labels = DataSampler().sample(10, "train")
     print(f"Samples shape: {samples.shape}")
     print(f"Labels shape: {labels}")
     visualize_wisdm_samples(samples, labels, num_plots=4)

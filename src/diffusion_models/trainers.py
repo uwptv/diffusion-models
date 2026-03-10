@@ -195,28 +195,17 @@ class TinyHARTrainer(Trainer):
     def get_optimizer(self, lr: float):
         return torch.optim.Adam(self.model.parameters(), lr=lr)
 
-    def _normalize_labels(self, labels: torch.Tensor) -> torch.Tensor:
-        """Normalize labels to 0-indexed for CrossEntropyLoss."""
-        labels = labels.squeeze(-1).long()
-        num_classes = self._get_num_classes()
-        if num_classes is not None:
-            min_val = int(labels.min().item())
-            max_val = int(labels.max().item())
-            if min_val == 1 and max_val <= num_classes:
-                labels = labels - 1
-        return labels
-
     def get_training_loss(self, batch_size: int) -> torch.Tensor:
         """Compute training loss from the training sampler."""
         x, labels = self.path.sample_conditioning_variable(batch_size, subset="train")
-        labels = self._normalize_labels(labels)
+        labels = labels.squeeze(1).long()
         train_pred = self.model(x)
         return nn.CrossEntropyLoss()(train_pred, labels)
 
     def get_validation_loss(self, batch_size: int) -> torch.Tensor:
         """Compute validation loss from the validation sampler."""
         x, labels = self.path.sample_conditioning_variable(batch_size, subset="val")
-        labels = self._normalize_labels(labels)
+        labels = labels.squeeze(1).long()
         with torch.no_grad():
             val_pred = self.model(x)
         return nn.CrossEntropyLoss()(val_pred, labels)
@@ -224,22 +213,19 @@ class TinyHARTrainer(Trainer):
     def _compute_predictions(self, num_samples: int, device: torch.device):
         """Helper to compute predictions and labels from validation set."""
         x, labels = self.path.sample_conditioning_variable(num_samples, subset="test")
-        labels = self._normalize_labels(labels)
         x = x.to(device)
+        labels = labels.squeeze(1).long()
 
         with torch.no_grad():
-            logits = self.model(x)
-            preds = torch.argmax(logits, dim=1).cpu()
+            preds = torch.argmax(self.model(x), dim=1).cpu()
 
         return labels.cpu().numpy(), preds.numpy()
 
     def _compute_confusion_matrix(self, num_samples: int, device: torch.device):
         labels_np, preds_np = self._compute_predictions(num_samples, device)
-        num_classes = self._get_num_classes()
         return confusion_matrix(
             labels_np,
             preds_np,
-            labels=list(range(num_classes)) if num_classes is not None else None,
         )
 
     def _compute_f1_score(self, num_samples: int, device: torch.device):
