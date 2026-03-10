@@ -32,6 +32,7 @@ class HAUNet(UNet):
         hidden_size_rnn: int,
         num_layers_rnn: int,
         num_cc_heads: int,
+        cc_expansion_factor: int,
     ):
         super().__init__(cond_dim, num_classes)
         # initial convolution
@@ -59,6 +60,7 @@ class HAUNet(UNet):
                     hidden_size_rnn,
                     num_layers_rnn,
                     num_cc_heads,
+                    cc_expansion_factor,
                 )
             )
             decoders.append(

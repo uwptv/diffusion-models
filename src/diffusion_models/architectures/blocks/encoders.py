@@ -334,6 +334,9 @@ class HAEncoder(nn.Module):
 
         bs, channels, features_out, L = x.shape
         x = x.permute(0, 1, 3, 2).reshape(bs * channels, features_out, L)
+
+        skip = x.clone()  # (bs * channels, features_out, L)
+
         # Downsample: (bs * channels, features_out, L) -> (bs * channels, features_out, L // 2)
         x = self.downsample(x)
 
@@ -343,4 +346,4 @@ class HAEncoder(nn.Module):
             bs, channels, L, features_out
         )  # (bs, channels, L // 2, features_out)
 
-        return x
+        return x, skip

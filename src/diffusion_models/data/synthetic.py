@@ -178,14 +178,14 @@ class WaveSampler(nn.Module, Sampleable):
             )
             class_indices = torch.full(
                 (num_samples,),
-                class_idx + 1,
+                class_idx,
                 device=self.dummy.device,
                 dtype=torch.long,
             )
         else:
             class_indices = torch.randint(
-                1,
-                num_data_classes + 1,
+                0,
+                num_data_classes,
                 (num_samples,),
                 device=self.dummy.device,
                 generator=self._gen,
@@ -198,7 +198,7 @@ class WaveSampler(nn.Module, Sampleable):
         )
         frequencies = torch.clamp(frequencies, min=1.0)
 
-        amps = amplitudes_tensor[class_indices - 1].unsqueeze(1)
+        amps = amplitudes_tensor[class_indices].unsqueeze(1)
         freqs = frequencies.unsqueeze(1)
 
         sine_waves = amps * torch.sin(2 * torch.pi * freqs * t + self.phase)

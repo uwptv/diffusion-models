@@ -147,6 +147,7 @@ class CFGTrainer(Trainer):
         path: GaussianConditionalProbabilityPath,
         model: ConditionalVectorField,
         eta: float,
+        null_class: int,
         seed: int = 42,
         **kwargs,
     ):
@@ -154,12 +155,13 @@ class CFGTrainer(Trainer):
         super().__init__(model, seed=seed, **kwargs)
         self.eta = eta
         self.path = path
+        self.null_class = null_class
 
     def _sample_batch(self, batch_size: int, subset: str = "train"):
         z, y = self.path.sample_conditioning_variable(batch_size, subset=subset)
 
         mask = torch.rand(batch_size, device=z.device, generator=self._gen) < self.eta
-        y[mask] = 0
+        y[mask] = self.null_class
 
         t = torch.rand(
             (batch_size,) + (1,) * (z.ndim - 1), generator=self._gen, device=z.device
@@ -193,15 +195,6 @@ class TinyHARTrainer(Trainer):
     def get_optimizer(self, lr: float):
         return torch.optim.Adam(self.model.parameters(), lr=lr)
 
-    def _get_num_classes(self) -> int | None:
-        if hasattr(self.model, "num_classes"):
-            return self.model.num_classes
-        if hasattr(self.model, "classifier") and hasattr(
-            self.model.classifier, "out_features"
-        ):
-            return self.model.classifier.out_features
-        return None
-
     def _normalize_labels(self, labels: torch.Tensor) -> torch.Tensor:
         """Normalize labels to 0-indexed for CrossEntropyLoss."""
         labels = labels.squeeze(-1).long()
@@ -215,14 +208,14 @@ class TinyHARTrainer(Trainer):
 
     def get_training_loss(self, batch_size: int) -> torch.Tensor:
         """Compute training loss from the training sampler."""
-        x, labels = self.path.sample_conditioning_variable(batch_size)
+        x, labels = self.path.sample_conditioning_variable(batch_size, subset="train")
         labels = self._normalize_labels(labels)
         train_pred = self.model(x)
         return nn.CrossEntropyLoss()(train_pred, labels)
 
     def get_validation_loss(self, batch_size: int) -> torch.Tensor:
         """Compute validation loss from the validation sampler."""
-        x, labels = self.path.sample_conditioning_variable(batch_size)
+        x, labels = self.path.sample_conditioning_variable(batch_size, subset="val")
         labels = self._normalize_labels(labels)
         with torch.no_grad():
             val_pred = self.model(x)
@@ -230,7 +223,7 @@ class TinyHARTrainer(Trainer):
 
     def _compute_predictions(self, num_samples: int, device: torch.device):
         """Helper to compute predictions and labels from validation set."""
-        x, labels = self.path.sample_conditioning_variable(num_samples)
+        x, labels = self.path.sample_conditioning_variable(num_samples, subset="test")
         labels = self._normalize_labels(labels)
         x = x.to(device)
 
@@ -266,15 +259,30 @@ class TinyHARTrainer(Trainer):
         save_path = Path(save_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
 
-        plt.figure(figsize=(6, 5))
+        plt.figure(figsize=(7, 6))
         plt.imshow(cm, cmap="Blues")
         plt.colorbar()
         plt.xlabel("Predicted")
         plt.ylabel("True")
+        plt.title("Confusion Matrix (Counts)")
+
+        n_rows, n_cols = cm.shape
         if class_names:
             ticks = range(len(class_names))
             plt.xticks(ticks, class_names, rotation=45, ha="right")
             plt.yticks(ticks, class_names)
+        else:
+            plt.xticks(range(n_cols))
+            plt.yticks(range(n_rows))
+
+        # Write counts into each cell
+        threshold = cm.max() / 2.0 if cm.size > 0 else 0.0
+        for i in range(n_rows):
+            for j in range(n_cols):
+                val = int(cm[i, j])
+                color = "white" if cm[i, j] > threshold else "black"
+                plt.text(j, i, f"{val}", ha="center", va="center", color=color)
+
         plt.tight_layout()
         plt.savefig(save_path)
         plt.close()

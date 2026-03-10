@@ -322,42 +322,21 @@ class HADecoder(nn.Module):
             num_tfilm_blocks, features_out, hidden_size_rnn, num_layers_rnn
         )
 
-    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, skip: torch.Tensor, cond_embed: torch.Tensor
+    ) -> torch.Tensor:
         """
         Args:
-        - x: (bs, channels, L, features_in)
+        - x: (bs, channels, L, features_in / 2)
+        - skip: (bs * channels, features_in, L)
         - cond_embed: (bs, cond_dim)
         Returns:
         - x: (bs, channels, 2*L, features_out)
         """
         bs, c, seq_len, feat_dim = x.shape
-        # Merge batch and channels for upsampling
-        x = x.permute(0, 1, 3, 2).reshape(
-            bs * c, feat_dim, seq_len
-        )  # (bs * channels, features_in, L)
-
-        # Upsample: (bs * channels, features_in, L) -> (bs * channels, features_out, 2*L)
-        x = self.upsample(x)
-        x = self.norm(x, cond_embed.repeat_interleave(c, dim=0))
-        x = self.activation(x)
-
-        # Refine the upsampled features with separable convolution: (bs * channels, features_out, 2*L) -> (bs * channels, features_out, 2*L)
-        x = self.refinement(x)
-        x = self.norm(x, cond_embed.repeat_interleave(c, dim=0))
-        x = self.activation(x)
-
-        # Update feature dimension after upsampling
-        _, feat_out, seq_len = x.shape
-
-        # Add temporal attention: (bs * channels, features_out, 2*L) -> (bs * channels, features_out, 2*L)
-        x = self.temporal_attention(x, cond_embed.repeat_interleave(c, dim=0))
-        # Reshape back
-        x = x.reshape(bs, c, feat_out, seq_len).permute(
-            0, 1, 3, 2
-        )  # (bs, channels, 2*L, features_out)
-
-        # Cross-Channel Attention: (bs, channels, 2*L, features_out) -> (bs, channels, 2*L, features_out)
-        x = self.cc_attention(x)
+        # Reshape for upsampling: (bs, channels, L, feat_in) -> (bs, channels * feat_in, L)
+        x = x.permute(0, 1, 3, 2).contiguous().view(bs * c, feat_dim, seq_len)
+        x = self.upsample(x)  # (bs * channels, feat_in, 2*L)
 
         # Pass through residual blocks: (bs, channels, 2*L, features_out) -> (bs, channels, 2*L, features_out)
         for block in self.res_blocks:

@@ -72,6 +72,7 @@ class CFGVectorFieldODE(ODE):
     def __init__(
         self,
         net: ConditionalVectorField,
+        null_class: int,
         guidance_scale: float = 1.0,
     ):
         self.net = net

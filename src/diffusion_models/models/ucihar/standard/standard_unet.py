@@ -3,8 +3,8 @@ import optuna
 import torch
 from optuna.pruners import MedianPruner
 
-from diffusion_models.architectures.HAUNet import HAUNet
-from diffusion_models.data.synthetic import WaveSampler
+from diffusion_models.architectures.standard_unet import StandardUNet
+from diffusion_models.data.loaders import DataSampler
 from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath
 from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
 from diffusion_models.training_config import (
@@ -17,13 +17,13 @@ from diffusion_models.training_config import (
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 cfg = TrainingConfig(
-    dataset=WaveSampler(),
-    num_classes=3,
+    dataset=DataSampler(dataset="uci_har"),
+    num_classes=6,
     channels=3,
     sequence_length=128,
-    experiment_name="haunet_v2",
-    model_name="haunet_toy",
-    use_toy=True,
+    experiment_name="standard_unet_uci_har",
+    model_name="standard_unet_uci_har",
+    use_toy=True,  # Toy tiny har uses same channels and sequence length as uci har
 )
 
 # Initialize probability path
@@ -41,34 +41,24 @@ def suggest_params(trial: optuna.Trial) -> dict:
     return {
         "initial_channels": trial.suggest_categorical("initial_channels", [4, 8, 16]),
         "levels": trial.suggest_int("levels", 1, 2),
+        "num_residual_layers": trial.suggest_int("num_residual_layers", 1, 2),
         "cond_dim": trial.suggest_categorical("cond_dim", [48, 64]),
         "upsampling_method": trial.suggest_categorical(
             "upsampling_method", ["transposed", "interpolation", "pixel_shuffle"]
         ),
-        "num_residual_layers": trial.suggest_int("num_residual_layers", 1, 2),
-        "num_tfilm_blocks": trial.suggest_categorical(
-            "num_tfilm_blocks", [2, 4, 8, 16]
-        ),
-        "hidden_size_rnn": trial.suggest_categorical("hidden_size_rnn", [32, 64, 128]),
-        "num_layers_rnn": trial.suggest_int("num_layers_rnn", 1, 2),
-        "num_cc_heads": trial.suggest_categorical("num_cc_heads", [1, 2, 4]),
         "learning_rate": trial.suggest_categorical("learning_rate", [1e-4, 5e-4, 1e-3]),
     }
 
 
-def build_model(hyperparams: dict) -> HAUNet:
-    return HAUNet(
+def build_model(hyperparams: dict) -> StandardUNet:
+    return StandardUNet(
         input_channels=cfg.channels,
         num_classes=cfg.num_classes,
-        initial_features=hyperparams["initial_channels"],
+        initial_channels=hyperparams["initial_channels"],
         levels=hyperparams["levels"],
         upsampling_method=hyperparams["upsampling_method"],
         num_residual_layers=hyperparams["num_residual_layers"],
         cond_dim=hyperparams["cond_dim"],
-        num_tfilm_blocks=hyperparams["num_tfilm_blocks"],
-        hidden_size_rnn=hyperparams["hidden_size_rnn"],
-        num_layers_rnn=hyperparams["num_layers_rnn"],
-        num_cc_heads=hyperparams["num_cc_heads"],
     )
 
 

@@ -114,9 +114,8 @@ class UNet(ConditionalVectorField, ABC):
         # Initialize from noise
         x0 = torch.randn(num_samples, *p_data_shape, device=device)
 
-        # Class labels for model are 1-indexed, with 0 reserved for unconditional
         class_labels = torch.full(
-            (num_samples,), class_idx + 1, device=device, dtype=torch.long
+            (num_samples,), class_idx, device=device, dtype=torch.long
         )
 
         # Create timesteps from t=0 to t=1
@@ -125,7 +124,9 @@ class UNet(ConditionalVectorField, ABC):
         ts = ts.expand(num_samples, -1, *([1] * (x0.ndim - 1)))  # (B, T, 1, ...)
 
         # Create ODE and simulator
-        ode = CFGVectorFieldODE(self, guidance_scale=guidance_scale)
+        ode = CFGVectorFieldODE(
+            self, guidance_scale=guidance_scale, null_class=self.num_classes
+        )
         simulator = EulerSimulator(ode)
 
         # Simulate

@@ -68,15 +68,18 @@ class DataSampler(nn.Module, Sampleable):
         dataset: str = "wisdm",
         seed: int = 42,
         window_time: float = 6.0,
+        balanced: bool = True,
     ):
         super().__init__()
         # create cfg for dataset
         dataset_id = WHARDatasetID(dataset)
         cfg = get_dataset_cfg(dataset_id)
         # cfg.parallelize = True
-        # if dataset_id == WHARDatasetID.UCI_HAR:
-        #     cfg.sensor_channels = ["body_acc_x", "body_acc_y", "body_acc_z"]
-        cfg.window_time = window_time
+        if dataset_id == WHARDatasetID.UCI_HAR:
+            cfg.sensor_channels = ["body_acc_x", "body_acc_y", "body_acc_z"]
+            cfg.window_time = 2.56  # 128 timesteps at 50Hz
+        else:
+            cfg.window_time = window_time
         cfg.seed = seed
 
         # create and run pre-processing pipeline
@@ -100,6 +103,8 @@ class DataSampler(nn.Module, Sampleable):
             torch.zeros(1)
         )  # Will automatically be moved when self.to(...) is called
         self.seed = seed
+        self.balanced = balanced
+        self.num_classes = cfg.num_of_activities
 
     def sample(
         self,
@@ -111,10 +116,10 @@ class DataSampler(nn.Module, Sampleable):
         Args:
             - num_samples: the desired number of samples
             - subset: which set to sample from ("train", "val", or "test")
-            - class_idx: if provided, only sample from this class (1-6 for WISDM, where 0 is unconditional)
+            - class_idx: if provided, only sample from this class (0-indexed). If None, sample from all classes.
         Returns:
             - samples: shape (batch_size, channels, signal_length)
-            - labels: shape (batch_size, label_dim) with values 1-6 (0 reserved for unconditional)
+            - labels: shape (batch_size, label_dim = 1) with values corresponding to activity class indices
         """
         if subset == "train":
             indices = self.split.train_indices
@@ -125,38 +130,73 @@ class DataSampler(nn.Module, Sampleable):
         else:
             raise ValueError(f"Invalid subset: {subset}")
 
-        if class_idx is not None and (class_idx < 0 or class_idx > 5):
+        samples_list = []
+        labels_list = []
+        num_classes = self.num_classes
+
+        if class_idx is not None and (class_idx < 0 or class_idx > num_classes - 1):
             raise ValueError(
-                f"Invalid class_idx: {class_idx}. Must be between 0 and 5."
+                f"Invalid class_idx: {class_idx}. Must be between 0 and {num_classes - 1}."
             )
         elif class_idx is not None:
             activity_labels, _, samples = self.loader.sample_items(
                 num_samples, indices=indices, activity_id=class_idx, seed=self.seed
             )
+            samples_list.append(samples)
+            labels_list.append(activity_labels)
         else:
-            activity_labels, _, samples = self.loader.sample_items(
-                num_samples, indices=indices, seed=self.seed
+            # Default behavior: sample as evenly as possible from all classes.
+            # Any remainder is distributed to the first classes.
+            base = num_samples // num_classes
+            remainder = num_samples % num_classes
+
+            for activity_idx in range(num_classes):
+                n_for_class = base + (1 if activity_idx < remainder else 0)
+                if n_for_class == 0:
+                    continue
+
+                activity_labels, _, samples = self.loader.sample_items(
+                    n_for_class,
+                    indices=indices,
+                    activity_id=activity_idx,
+                    seed=self.seed,
+                )
+                samples_list.append(samples)
+                labels_list.append(activity_labels)
+        if not samples_list:
+            raise ValueError(
+                "No samples were collected. Check num_samples and filters."
             )
-        activity_labels = map(lambda x: x + 1, activity_labels)  # shift to 1-6
+
+        samples_np = np.concatenate(
+            [np.asarray(sample_batch) for sample_batch in samples_list], axis=0
+        )
+        labels_np = np.concatenate(
+            [np.asarray(label_batch) for label_batch in labels_list], axis=0
+        )
 
         # Convert to tensors of appropriate shape
         samples = torch.tensor(
-            np.array(samples), dtype=torch.float32, device=self.dummy.device
+            samples_np, dtype=torch.float32, device=self.dummy.device
         )  # (batch_size, 1, signal_length, channels)
         samples = samples.squeeze(1).permute(
             0, 2, 1
         )  # (batch_size, signal_length, channels)
 
         activity_labels = torch.tensor(
-            list(activity_labels), dtype=torch.int64, device=self.dummy.device
+            labels_np, dtype=torch.int64, device=self.dummy.device
         ).unsqueeze(1)  # shape (batch_size, 1)
 
+        # Shuffle samples and labels with the same permutation.
+        # Build permutation on CPU for deterministic seeding, then move to tensor device.
+        permutation = torch.randperm(
+            num_samples,
+            generator=torch.Generator().manual_seed(self.seed),
+        ).to(self.dummy.device)
+        samples = samples[permutation]
+        activity_labels = activity_labels[permutation]
+
         return samples, activity_labels
-
-
-# samples, labels = DataSampler(dataset="wisdm").sample(10, "train", class_idx=3)
-# print(f"Samples shape: {samples.size()}")
-# print(f"Labels shape: {labels.size()}")
 
 
 def visualize_wisdm_samples(
@@ -220,4 +260,8 @@ def visualize_wisdm_samples(
     plt.show()
 
 
-# visualize_wisdm_samples(samples, labels, num_plots=4)
+if __name__ == "__main__":
+    samples, labels = DataSampler(dataset="uci_har").sample(10, "train")
+    print(f"Samples shape: {samples.shape}")
+    print(f"Labels shape: {labels}")
+    visualize_wisdm_samples(samples, labels, num_plots=4)
