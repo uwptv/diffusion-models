@@ -9,7 +9,7 @@ from diffusion_models.architectures.blocks.base import (
     ResidualBlock,
     SeperableResidualBlock,
 )
-from diffusion_models.architectures.blocks.tfilm import HATFiLM, TFiLM, TFiLMTransformer
+from diffusion_models.architectures.blocks.tfilm import TFiLM, TFiLMTransformer
 
 
 class Encoder1D(nn.Module):
@@ -295,6 +295,7 @@ class HAEncoder(nn.Module):
                 features_in,
                 features_out,
                 cond_dim,
+                channels,
             )
         )
         # Remaining blocks keep features fixed: features_out -> features_out
@@ -304,46 +305,43 @@ class HAEncoder(nn.Module):
                     features_out,
                     features_out,
                     cond_dim,
+                    channels,
                 )
             )
 
-        self.temporal_attention = HATFiLM(
+        self.temporal_attention = TFiLM(
             num_tfilm_blocks, features_out, hidden_size_rnn, num_layers_rnn
         )
         self.cc_attention = CrossChannelAttention(
+            channels,
             features_out,
             num_cc_heads,
             cc_expansion_factor,
+        )
+        self.downsample = nn.Conv1d(
+            features_out, features_out, kernel_size=3, stride=2, padding=1
         )
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
         Args:
-        - x: (bs, channels, L, features_in)
+        - x: (bs * channels, features_in, L)
         - cond_embed: (bs, cond_dim)
         Returns:
-        - x: (bs, channels, L // 2, features_out)
+        - x: (bs * channels, features_out, L // 2)
+        - skip: (bs * channels, features_out, L)
         """
-        # Pass through residual blocks: (bs, channels, L, features_in) -> (bs, channels, L, features_out)
+        # Pass through residual blocks: (bs * channels, features_in, L) -> (bs * channels, features_out, L)
         for block in self.res_blocks:
             x = block(x, cond=cond_embed)  # (bs * channels, features_out, L)
             x = self.temporal_attention(
                 x, cond_embed
-            )  # (bs, channels, features_out, L)
-            x = self.cc_attention(x)  # (bs, channels, L, features_out)
+            )  # (bs * channels, features_out, L)
+            x = self.cc_attention(x)  # (bs * channels, features_out, L)
 
-        bs, channels, features_out, L = x.shape
-        x = x.permute(0, 1, 3, 2).reshape(bs * channels, features_out, L)
-
-        skip = x.clone()  # (bs * channels, features_out, L)
+        skip = x  # (bs * channels, features_out, L)
 
         # Downsample: (bs * channels, features_out, L) -> (bs * channels, features_out, L // 2)
         x = self.downsample(x)
-
-        _, _, L = x.shape
-
-        x = x.permute(0, 2, 1).reshape(
-            bs, channels, L, features_out
-        )  # (bs, channels, L // 2, features_out)
 
         return x, skip

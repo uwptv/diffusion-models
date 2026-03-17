@@ -11,13 +11,13 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Create path
 path = GaussianConditionalProbabilityPath(
     p_data=DataSampler(dataset="uci_har"),
-    p_simple_shape=[3, 120],
+    p_simple_shape=[3, 128],
     alpha=LinearAlpha(),
     beta=LinearBeta(),
 ).to(device)
 
 # Create model
-model = TinyHAR(input_channels=3, window_size=120, num_classes=6)
+model = TinyHAR(input_channels=3, window_size=128, num_classes=6)
 
 # Create trainer
 trainer = TinyHARTrainer(

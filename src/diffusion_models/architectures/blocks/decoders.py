@@ -3,13 +3,11 @@ import torch.nn as nn
 
 from diffusion_models.architectures.blocks.base import (
     CBAM,
-    AdaGroupNorm,
     CrossChannelAttention,
     HAResidualLayer,
     MBConv,
     ResidualBlock,
     SeperableResidualBlock,
-    get_activation,
     get_upsampling,
 )
 from diffusion_models.architectures.blocks.tfilm import TFiLM, TFiLMTransformer
@@ -286,36 +284,40 @@ class HADecoder(nn.Module):
         hidden_size_rnn: int,
         num_layers_rnn: int,
         num_cc_heads: int,
-        num_cc_layers: int,
-        activation: str = "silu",
+        cc_expansion_factor: int,
     ):
         super().__init__()
-        self.cond_dim = cond_dim
-        self.activation = get_activation(activation)
-        self.norm = AdaGroupNorm(num_channels=features_out, cond_dim=cond_dim)
-
         # Define Layers
         upsample_method = get_upsampling(method)
-        self.upsample = upsample_method(features_in, features_out)
-        self.refinement = nn.Conv1d(
-            features_out, features_out, kernel_size=3, padding=1
-        )
+        self.upsample = upsample_method(features_in // 2)
 
-        self.res_blocks = nn.ModuleList(
-            [
+        self.res_blocks = nn.ModuleList()
+
+        # First residual block expands features: features_in -> features_out
+        self.res_blocks.append(
+            HAResidualLayer(
+                features_in,
+                features_out,
+                cond_dim,
+                channels,
+            )
+        )
+        # Remaining blocks keep features fixed: features_out -> features_out
+        for _ in range(num_residual_layers - 1):
+            self.res_blocks.append(
                 HAResidualLayer(
                     features_out,
+                    features_out,
                     cond_dim,
+                    channels,
                 )
-                for _ in range(num_residual_layers)
-            ]
-        )
+            )
 
         self.cc_attention = CrossChannelAttention(
             channels,
             features_out,
             num_cc_heads,
-            num_cc_layers,
+            cc_expansion_factor,
         )
 
         self.temporal_attention = TFiLM(
@@ -327,19 +329,21 @@ class HADecoder(nn.Module):
     ) -> torch.Tensor:
         """
         Args:
-        - x: (bs, channels, L, features_in / 2)
-        - skip: (bs * channels, features_in, L)
+        - x: (bs * channels, features_in / 2, L)
+        - skip: (bs * channels, features_in / 2, 2 * L)
         - cond_embed: (bs, cond_dim)
         Returns:
-        - x: (bs, channels, 2*L, features_out)
+        - x: (bs * channels, features_out, 2*L)
         """
-        bs, c, seq_len, feat_dim = x.shape
-        # Reshape for upsampling: (bs, channels, L, feat_in) -> (bs, channels * feat_in, L)
-        x = x.permute(0, 1, 3, 2).contiguous().view(bs * c, feat_dim, seq_len)
-        x = self.upsample(x)  # (bs * channels, feat_in, 2*L)
+        x = self.upsample(x)  # (bs * channels, feat_in / 2, 2*L)
+        x = torch.cat([x, skip], dim=1)  # (bs * channels, features_in, 2 * L)
 
-        # Pass through residual blocks: (bs, channels, 2*L, features_out) -> (bs, channels, 2*L, features_out)
+        # Pass through residual blocks: (bs * channels, features_out, 2*L) -> (bs * channels, features_out, 2*L)
         for block in self.res_blocks:
-            x = block(x, cond=cond_embed)
+            x = block(x, cond=cond_embed)  # (bs * channels, features_out, 2*L)
+            x = self.temporal_attention(
+                x, cond_embed
+            )  # (bs * channels, features_out, 2*L)
+            x = self.cc_attention(x)  # (bs * channels, features_out, 2*L)
 
         return x

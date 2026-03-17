@@ -23,7 +23,7 @@ cfg = TrainingConfig(
     sequence_length=128,
     experiment_name="standard_unet",
     model_name="standard_unet_toy",
-    use_toy=True,
+    evaluator="toy",
 )
 
 # Initialize probability path

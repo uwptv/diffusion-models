@@ -38,7 +38,7 @@ class HAUNet(UNet):
         # initial convolution
         self.init_conv = DepthwiseConv1DExplicit(
             initial_features
-        )  # (bs, input_channels, L, initial_features)
+        )  # (bs * input_channels, initial_features, L)
 
         features = [initial_features]
         for _ in range(levels):
@@ -75,13 +75,16 @@ class HAUNet(UNet):
                     hidden_size_rnn,
                     num_layers_rnn,
                     num_cc_heads,
+                    cc_expansion_factor,
                 )
             )
         self.encoders = nn.ModuleList(encoders)
         self.decoders = nn.ModuleList(reversed(decoders))
 
         # use custom midcoder
-        self.midcoder = HAMidcoder(features[-1], num_residual_layers, cond_dim)
+        self.midcoder = HAMidcoder(
+            input_channels, features[-1], num_residual_layers, cond_dim
+        )
 
         # fuse features from feature dimension to output shape
-        self.final_conv = FeatureFusion(initial_features)
+        self.final_conv = FeatureFusion(input_channels, initial_features)

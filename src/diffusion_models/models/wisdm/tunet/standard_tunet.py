@@ -23,7 +23,7 @@ cfg = TrainingConfig(
     sequence_length=120,
     experiment_name="tunet_wisdm_v2",
     model_name="tunet_wisdm",
-    use_toy=False,
+    evaluator="wisdm",
 )
 
 # Initialize probability path

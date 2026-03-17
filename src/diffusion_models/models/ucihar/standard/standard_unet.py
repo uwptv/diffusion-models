@@ -23,7 +23,7 @@ cfg = TrainingConfig(
     sequence_length=128,
     experiment_name="standard_unet_uci_har",
     model_name="standard_unet_uci_har",
-    use_toy=True,  # Toy tiny har uses same channels and sequence length as uci har
+    evaluator="ucihar",
 )
 
 # Initialize probability path

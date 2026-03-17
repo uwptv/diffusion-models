@@ -228,30 +228,26 @@ class HAResidualLayer(ResidualBlock):
         features_in: int,
         features_out: int,
         cond_dim: int,
+        channels: int,
     ):
         super().__init__(
             features_in,
             features_out,
             cond_dim,
         )
+        self.channels = channels
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
         """
         Args:
-        - x: (bs, channels, L, features_in)
+        - x: (bs * channels, features_in, L)
         - cond: (bs, cond_dim)
         Returns:
         - output: (bs * channels, features_out, L)
         """
-        # Merge batch and channels
-        bs, channels, L, features = x.shape
-        x = x.permute(0, 1, 3, 2).reshape(
-            bs * channels, features, L
-        )  # (bs * channels, features_in, L)
-
         # Expand cond to match reshaped batch size
         # (bs, cond_dim) -> (bs*channels, cond_dim)
-        cond_expanded = cond.repeat_interleave(channels, dim=0)
+        cond_expanded = cond.repeat_interleave(self.channels, dim=0)
 
         x = super().forward(x, cond_expanded)  # (bs * channels, features_out, L)
 
@@ -268,11 +264,11 @@ class CrossChannelAttention(nn.Module):
         feature_dim: Feature dimension per channel (F)
         num_heads: Number of attention heads
         num_layers: Number of transformer layers
-        dropout: Dropout probability
     """
 
     def __init__(
         self,
+        channels: int,
         feature_dim: int,
         num_heads: int,
         ffn_expansion_factor: int,
@@ -286,29 +282,34 @@ class CrossChannelAttention(nn.Module):
         self.transformer = _TransformerLayer(
             feature_dim, num_heads, ffn_expansion_factor
         )
+        self.channels = channels
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            x: (B, C, features, T) - batch, channels, sequence_length, features_per_channel
-
+            x: (B * C, features, T) - batch * channels, features_per_channel, sequence_length
         Returns:
-            (B, C, T, features) - attended features
+            (B * C, features, T) - attended features
         """
-        B, C, F, T = x.shape
-
+        _, features, seq_len = x.shape
         # Reshape to apply attention across channels at each time step
-        # (B, C, F, T) -> (B*T, C, F)
+        # (B * C, F, T) -> (B*T, C, F)
         # This treats each timestep independently and applies cross-channel attention
-        x_reshaped = x.permute(0, 3, 1, 2).reshape(B * T, C, F)  # (B*T, C, F)
+        x_reshaped = (
+            x.view(-1, self.channels, features, seq_len)
+            .permute(0, 3, 1, 2)
+            .reshape(-1, self.channels, features)
+        )
 
         # Apply multi-head attention
-        attn_output, _ = self.attention(
-            x_reshaped, x_reshaped, x_reshaped
-        )  # (B*T, C, F)
+        attn_output = self.transformer(x_reshaped)  # (B*T, C, F)
 
-        # Reshape back: (B*T, C, F) -> (B, T, C, F) -> (B, C, T, F)
-        output = attn_output.reshape(B, T, C, F).permute(0, 2, 1, 3)
+        # Reshape back: (B*T, C, F) -> (B, T, C, F) -> (B * C, F, T)
+        output = (
+            attn_output.reshape(-1, seq_len, self.channels, features)
+            .permute(0, 2, 3, 1)
+            .reshape(-1, features, seq_len)
+        )
 
         return output
 
@@ -440,14 +441,14 @@ class DepthwiseConv1DExplicit(nn.Module):
             padding=1,
         )
 
-    def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
             x: Input tensor of shape (B, C, L)
             cond_embed: Condition embedding of shape (B, cond_dim)
 
         Returns:
-            Output tensor of shape (B, C, L_out, F)
+            Output tensor of shape (B * C, F, L_out)
         """
         B, C, L = x.shape
 
@@ -458,28 +459,40 @@ class DepthwiseConv1DExplicit(nn.Module):
         # Apply shared convolution: (B*C, 1, L) -> (B*C, F, L_out)
         features = self.depthwise_conv(x_reshaped)
 
-        # Reshape back: (B*C, F, L_out) -> (B, C, L_out, F)
-        _, F, L_out = features.shape
-        output = features.reshape(B, C, F, L_out).permute(0, 1, 3, 2)
-
-        return output
+        return features
 
 
 class FeatureFusion(nn.Module):
-    def __init__(self, feature_dim: int):
+    def __init__(self, channels, feature_dim: int):
         super().__init__()
         self.fusion_layer = nn.Linear(feature_dim, 1)
+        self.channels = channels
+        self.norm = AdaGroupNorm(
+            num_channels=channels, cond_dim=0
+        )  # No conditioning for fusion
+        self.activation = nn.SiLU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-        - x: (B, C, L, feature_dim)
+        - x: (B * C, F, L)
         Returns:
         - out: (B, C, L)
         """
-        x = self.fusion_layer(x)  # (B, C, L, 1)
-        out = x.squeeze(-1)  # (B, C, L)
-        return out
+        # Apply normalization and activation before fusion
+        x = self.norm(x)  # (B * C, F, L)
+        x = self.activation(x)
+
+        # Fuse features back to single value per channel
+        x = x.transpose(1, 2)  # (B * C, L, F)
+        x = self.fusion_layer(x)  # (B * C, L, 1)
+        x = x.squeeze(-1)  # (B * C, L)
+
+        # Reshape back to (B, C, L)
+        _, seq_len = x.shape
+        x = x.view(-1, self.channels, seq_len)  # (B, C, L)
+
+        return x
 
 
 class CBAM(nn.Module):

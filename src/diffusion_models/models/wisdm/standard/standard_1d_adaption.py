@@ -24,7 +24,7 @@ cfg = TrainingConfig(
     sequence_length=120,
     experiment_name="standard_unet_wisdm_v2",
     model_name="standard_unet_wisdm",
-    use_toy=False,
+    evaluator="wisdm",
 )
 
 # Initialize probability path
@@ -77,6 +77,8 @@ def objective(trial: optuna.Trial) -> float:
 
 if __name__ == "__main__":
     mlflow.set_experiment(cfg.experiment_name)
+    mlflow.set_experiment_tag("dataset", "wisdm")
+    mlflow.set_experiment_tag("model_family", "standard_unet")
 
     study = optuna.create_study(
         direction="minimize",

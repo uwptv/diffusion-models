@@ -1,0 +1,53 @@
+{
+  "dataset": "uci_har",
+  "training_variant": "balanced_loader_sampling",
+  "k_folds": 5,
+  "epochs": 10,
+  "batch_size": 64,
+  "learning_rate": 0.001,
+  "seed": 42,
+  "device": "cuda",
+  "folds": [
+    {
+      "fold": "fold_0",
+      "test_loss": 0.46156703597620913,
+      "accuracy": 0.8047368421052632,
+      "f1_macro": 0.8108215453536175
+    },
+    {
+      "fold": "fold_1",
+      "test_loss": 0.5811535367212798,
+      "accuracy": 0.7542105263157894,
+      "f1_macro": 0.7623207779584914
+    },
+    {
+      "fold": "fold_2",
+      "test_loss": 0.5687502022793418,
+      "accuracy": 0.7536842105263157,
+      "f1_macro": 0.7589839870421659
+    },
+    {
+      "fold": "fold_3",
+      "test_loss": 0.5423771090256541,
+      "accuracy": 0.7842105263157895,
+      "f1_macro": 0.7871123594513733
+    },
+    {
+      "fold": "fold_4",
+      "test_loss": 0.5974364413783197,
+      "accuracy": 0.7293312269615587,
+      "f1_macro": 0.7354480679473482
+    }
+  ],
+  "mean_accuracy": 0.7652346664449433,
+  "mean_f1_macro": 0.7709373475505992,
+  "per_fold_confusion_matrices": {
+    "fold_0": "outputs\\uci_har_balanced_loader\\confusion_matrix_fold_0.png",
+    "fold_1": "outputs\\uci_har_balanced_loader\\confusion_matrix_fold_1.png",
+    "fold_2": "outputs\\uci_har_balanced_loader\\confusion_matrix_fold_2.png",
+    "fold_3": "outputs\\uci_har_balanced_loader\\confusion_matrix_fold_3.png",
+    "fold_4": "outputs\\uci_har_balanced_loader\\confusion_matrix_fold_4.png"
+  },
+  "loss_curve": "outputs\\uci_har_balanced_loader\\loss_curve.png",
+  "confusion_matrix": "outputs\\uci_har_balanced_loader\\confusion_matrix.png"
+}

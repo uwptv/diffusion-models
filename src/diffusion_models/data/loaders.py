@@ -105,6 +105,14 @@ class DataSampler(nn.Module, Sampleable):
         self.seed = seed
         self.balanced = balanced
         self.num_classes = cfg.num_of_activities
+        self._gen = torch.Generator()  # CPU generator
+        if self.seed is not None:
+            self._gen.manual_seed(self.seed)
+
+    def reset_generator(self) -> None:
+        self._gen = torch.Generator()
+        if self.seed is not None:
+            self._gen.manual_seed(self.seed)
 
     def sample(
         self,
@@ -140,7 +148,7 @@ class DataSampler(nn.Module, Sampleable):
             )
         elif class_idx is not None:
             activity_labels, _, samples = self.loader.sample_items(
-                num_samples, indices=indices, activity_id=class_idx, seed=self.seed
+                num_samples, indices=indices, activity_id=class_idx
             )
             samples_list.append(samples)
             labels_list.append(activity_labels)
@@ -176,27 +184,114 @@ class DataSampler(nn.Module, Sampleable):
         )
 
         # Convert to tensors of appropriate shape
-        samples = torch.tensor(
-            samples_np, dtype=torch.float32, device=self.dummy.device
+        # Use from_numpy to avoid an extra CPU copy before moving to target device.
+        samples = torch.from_numpy(samples_np).to(
+            device=self.dummy.device, dtype=torch.float32
         )  # (batch_size, 1, signal_length, channels)
         samples = samples.squeeze(1).permute(
             0, 2, 1
         )  # (batch_size, signal_length, channels)
 
-        activity_labels = torch.tensor(
-            labels_np, dtype=torch.int64, device=self.dummy.device
-        ).unsqueeze(1)  # shape (batch_size, 1)
+        activity_labels = (
+            torch.from_numpy(labels_np)
+            .to(device=self.dummy.device, dtype=torch.int64)
+            .unsqueeze(1)
+        )  # shape (batch_size, 1)
 
         # Shuffle samples and labels with the same permutation.
-        # Build permutation on CPU for deterministic seeding, then move to tensor device.
         permutation = torch.randperm(
-            num_samples,
-            generator=torch.Generator().manual_seed(self.seed),
+            samples.size(0),
+            generator=self._gen,
         ).to(self.dummy.device)
         samples = samples[permutation]
         activity_labels = activity_labels[permutation]
 
         return samples, activity_labels
+
+    def showcase_class_imbalance(self, plot: bool = True) -> dict[str, object]:
+        """
+        Summarize overall class distribution across all available split indices
+        (train + val + test combined).
+
+        Returns:
+            {
+                "counts": {class_id: n, ...},
+                "percentages": {class_id: p, ...},
+                "imbalance_ratio": r,
+                "total": total_samples,
+            }
+        """
+        class_ids = list(range(self.num_classes))
+
+        # Combine indices from all splits once (deduplicated)
+        all_indices = sorted(
+            set(self.split.train_indices)
+            | set(self.split.val_indices)
+            | set(self.split.test_indices)
+        )
+
+        counts: dict[int, int] = {}
+        total = 0
+
+        for class_id in class_ids:
+            class_indices = self.loader.filter_indices(
+                indices=all_indices, activity_id=class_id
+            )
+            n = len(class_indices)
+            counts[class_id] = n
+            total += n
+
+        percentages = {
+            c: (100.0 * n / total if total > 0 else 0.0) for c, n in counts.items()
+        }
+
+        non_zero = [n for n in counts.values() if n > 0]
+        if len(non_zero) >= 2:
+            imbalance_ratio = max(non_zero) / min(non_zero)
+        else:
+            imbalance_ratio = float("inf") if len(non_zero) == 1 else 0.0
+
+        result = {
+            "counts": counts,
+            "percentages": percentages,
+            "imbalance_ratio": imbalance_ratio,
+            "total": total,
+        }
+
+        print(f"\n[all] total={total}, imbalance_ratio={imbalance_ratio:.3f}")
+        for c in class_ids:
+            print(f"  class {c}: {counts[c]} ({percentages[c]:.2f}%)")
+
+        if plot:
+            x = np.arange(self.num_classes)
+            all_counts = [counts[c] for c in class_ids]
+            all_percentages = [percentages[c] for c in class_ids]
+            colors = plt.cm.tab10(np.linspace(0, 1, self.num_classes))
+
+            plt.figure(figsize=(10, 5))
+            bars = plt.bar(x, all_counts, width=0.6, color=colors)
+            plt.xticks(x, [str(c) for c in class_ids])
+            plt.xlabel("Class")
+            plt.ylabel("Number of samples")
+            plt.title("Overall class distribution with class percentages")
+
+            # Add percentage labels above bars.
+            for bar, pct in zip(bars, all_percentages):
+                height = bar.get_height()
+                plt.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    height,
+                    f"{pct:.1f}%",
+                    ha="center",
+                    va="bottom",
+                    fontsize=9,
+                )
+
+            plt.grid(axis="y", alpha=0.3)
+            plt.tight_layout()
+            plt.show()
+
+        return result
 
 
 def visualize_wisdm_samples(
@@ -261,7 +356,6 @@ def visualize_wisdm_samples(
 
 
 if __name__ == "__main__":
-    samples, labels = DataSampler().sample(10, "train")
-    print(f"Samples shape: {samples.shape}")
-    print(f"Labels shape: {labels}")
+    sampler = DataSampler()
+    samples, labels = sampler.sample(num_samples=4, subset="train")
     visualize_wisdm_samples(samples, labels, num_plots=4)

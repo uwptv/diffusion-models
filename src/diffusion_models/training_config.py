@@ -28,7 +28,7 @@ class TrainingConfig:
     sequence_length: int
     experiment_name: str
     model_name: str
-    use_toy: bool
+    evaluator: str
 
     # Training hyperparameters
     seed: int = 42
@@ -89,6 +89,7 @@ def run_objective_trial(
         path=path,
         model=model,
         eta=0.1,
+        null_class=cfg.num_classes,
         trial=trial,
         stopper=EarlyStopping(patience=cfg.patience),
     )
@@ -183,6 +184,7 @@ def retrain_best_model(
             path=path,
             model=model,
             eta=0.1,
+            null_class=cfg.num_classes,
             stopper=EarlyStopping(patience=cfg.patience),
         )
 
@@ -225,7 +227,7 @@ def evaluate_model(
             path=path,
             num_classes=cfg.num_classes,
             guidance_scales=cfg.guidance_scales,
-            use_toy=cfg.use_toy,
+            evaluator=cfg.evaluator,
         )
 
         mlflow.log_metrics(metrics)

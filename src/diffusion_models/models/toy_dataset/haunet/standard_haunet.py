@@ -23,7 +23,7 @@ cfg = TrainingConfig(
     sequence_length=128,
     experiment_name="haunet_v2",
     model_name="haunet_toy",
-    use_toy=True,
+    evaluator="toy",
 )
 
 # Initialize probability path
@@ -52,6 +52,9 @@ def suggest_params(trial: optuna.Trial) -> dict:
         "hidden_size_rnn": trial.suggest_categorical("hidden_size_rnn", [32, 64, 128]),
         "num_layers_rnn": trial.suggest_int("num_layers_rnn", 1, 2),
         "num_cc_heads": trial.suggest_categorical("num_cc_heads", [1, 2, 4]),
+        "cc_expansion_factor": trial.suggest_categorical(
+            "cc_expansion_factor", [2, 4, 8]
+        ),
         "learning_rate": trial.suggest_categorical("learning_rate", [1e-4, 5e-4, 1e-3]),
     }
 
@@ -63,12 +66,13 @@ def build_model(hyperparams: dict) -> HAUNet:
         initial_features=hyperparams["initial_channels"],
         levels=hyperparams["levels"],
         upsampling_method=hyperparams["upsampling_method"],
-        num_residual_layers=hyperparams["num_residual_layers"],
         cond_dim=hyperparams["cond_dim"],
+        num_residual_layers=hyperparams["num_residual_layers"],
         num_tfilm_blocks=hyperparams["num_tfilm_blocks"],
         hidden_size_rnn=hyperparams["hidden_size_rnn"],
         num_layers_rnn=hyperparams["num_layers_rnn"],
         num_cc_heads=hyperparams["num_cc_heads"],
+        cc_expansion_factor=hyperparams["cc_expansion_factor"],
     )
 
 

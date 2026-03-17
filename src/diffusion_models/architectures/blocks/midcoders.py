@@ -95,13 +95,17 @@ class MBConvMidcoder(Midcoder1D):
 class HAMidcoder(Midcoder1D):
     def __init__(
         self,
+        channels: int,
         features: int,
         num_residual_layers: int,
         cond_dim: int,
     ):
         super().__init__(features, num_residual_layers, cond_dim)
         self.res_blocks = nn.ModuleList(
-            [HAResidualLayer(features, cond_dim) for _ in range(num_residual_layers)]
+            [
+                HAResidualLayer(features, features, cond_dim, channels)
+                for _ in range(num_residual_layers)
+            ]
         )
 
 
