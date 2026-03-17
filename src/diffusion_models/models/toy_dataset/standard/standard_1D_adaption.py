@@ -21,7 +21,7 @@ cfg = TrainingConfig(
     num_classes=3,
     channels=3,
     sequence_length=128,
-    experiment_name="standard_unet",
+    experiment_name="standard_unet_v2",
     model_name="standard_unet_toy",
     evaluator="toy",
 )
