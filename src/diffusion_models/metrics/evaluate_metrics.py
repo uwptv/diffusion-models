@@ -44,7 +44,9 @@ def compute_all_metrics(
         # Sample real data once for all guidance scales
         real_data_all_classes = []
         for class_idx in range(num_classes):
-            real_sensor_data, _ = path.p_data.sample(10000, class_idx=class_idx)
+            real_sensor_data, _ = path.p_data.sample(
+                10000, class_idx=class_idx, subset="test"
+            )
             real_data_all_classes.append(real_sensor_data)
 
         guidance_real_data.append(real_data_all_classes)
