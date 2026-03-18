@@ -21,9 +21,9 @@ cfg = TrainingConfig(
     num_classes=3,
     channels=3,
     sequence_length=128,
-    experiment_name="seperable_tunet_v2",
+    experiment_name="seperable_tunet_v3",
     model_name="seperable_tunet_toy",
-    use_toy=True,
+    evaluator="toy",
 )
 
 # Initialize probability path
@@ -94,6 +94,8 @@ def objective(trial: optuna.Trial) -> float:
 
 if __name__ == "__main__":
     mlflow.set_experiment(cfg.experiment_name)
+    mlflow.set_experiment_tag("dataset", "toy")
+    mlflow.set_experiment_tag("model_family", "seperable_tunet")
 
     study = optuna.create_study(
         direction="minimize",

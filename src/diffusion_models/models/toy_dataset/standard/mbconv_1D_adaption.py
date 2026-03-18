@@ -21,9 +21,9 @@ cfg = TrainingConfig(
     num_classes=3,
     channels=3,
     sequence_length=128,
-    experiment_name="mbconv_unet_v2",
+    experiment_name="mbconv_unet_v3",
     model_name="mbconv_unet_toy",
-    use_toy=True,
+    evaluator="toy",
 )
 
 # Initialize probability path
@@ -45,7 +45,7 @@ def suggest_params(trial: optuna.Trial) -> dict:
         "upsampling_method": trial.suggest_categorical(
             "upsampling_method", ["transposed", "interpolation", "pixel_shuffle"]
         ),
-        "num_mbconv_layers": trial.suggest_int("num_mbconv_layers", 1, 3),
+        "num_mbconv_layers": trial.suggest_int("num_mbconv_layers", 1, 2),
         "expansion_factor": trial.suggest_int("expansion_factor", 3, 6),
         "kernel_size": trial.suggest_categorical("kernel_size", [3, 5, 7]),
         "learning_rate": trial.suggest_categorical("learning_rate", [1e-4, 5e-4, 1e-3]),
@@ -80,6 +80,8 @@ def objective(trial: optuna.Trial) -> float:
 
 if __name__ == "__main__":
     mlflow.set_experiment(cfg.experiment_name)
+    mlflow.set_experiment_tag("dataset", "toy")
+    mlflow.set_experiment_tag("model_family", "mbconv_unet")
 
     study = optuna.create_study(
         direction="minimize",

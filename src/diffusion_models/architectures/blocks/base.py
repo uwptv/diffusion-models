@@ -331,7 +331,8 @@ class AdaGroupNorm(nn.Module):
             num_groups -= 1
 
         self.group_norm = nn.GroupNorm(num_groups, num_channels, affine=False, eps=1e-6)
-        self.linear = nn.Linear(cond_dim, 2 * num_channels)
+        if cond_dim > 0:
+            self.linear = nn.Linear(cond_dim, 2 * num_channels)
         # outputs scale (γ) and shift (β)
         # Initialize to do nothing at start (γ ≈ 1, β ≈ 0)
 
@@ -468,7 +469,7 @@ class FeatureFusion(nn.Module):
         self.fusion_layer = nn.Linear(feature_dim, 1)
         self.channels = channels
         self.norm = AdaGroupNorm(
-            num_channels=channels, cond_dim=0
+            num_channels=feature_dim, cond_dim=0
         )  # No conditioning for fusion
         self.activation = nn.SiLU()
 

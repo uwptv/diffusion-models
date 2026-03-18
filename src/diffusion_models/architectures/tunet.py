@@ -44,8 +44,6 @@ class TUNet(TFiLMUNet):
         )
         self.midcoder = TransformerMidcoder(
             channels=initial_channels * (2**levels),
-            num_residual_layers=num_residual_layers,
-            cond_dim=cond_dim,
             num_heads=num_heads,
             ffn_expansion_factor=ffn_expansion_factor,
         )

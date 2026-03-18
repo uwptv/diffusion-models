@@ -219,7 +219,7 @@ class LinearAttention(nn.Module):
         return self.to_out(out)
 
 
-class TransformerMidcoder(Midcoder1D):
+class TransformerMidcoder(nn.Module):
     """
     Midcoder that uses self attention across the time domain for 1D signals. Used to capture long-range time dependencies. Input vectors are channel vectors at each time step, so attention is applied across the time dimension.
     """
@@ -227,15 +227,11 @@ class TransformerMidcoder(Midcoder1D):
     def __init__(
         self,
         channels,
-        num_residual_layers: int,
-        cond_dim: int,
         num_heads: int,
         ffn_expansion_factor: int,
     ):
-        super().__init__(channels, num_residual_layers, cond_dim)
+        super().__init__()
         self.pos_enc = SinusoidalEmbedding(channels)
-
-        # Create lists for each component
         self.transformer = _TransformerLayer(channels, num_heads, ffn_expansion_factor)
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
@@ -244,8 +240,6 @@ class TransformerMidcoder(Midcoder1D):
         - x: (bs, c, L)
         - cond_embed: (bs, cond_dim)
         """
-        x = super().forward(x, cond_embed)  # Pass through residual layers first
-
         _, _, seq_len = x.shape
 
         # Apply positional encoding once

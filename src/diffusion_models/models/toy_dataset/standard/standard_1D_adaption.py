@@ -76,6 +76,8 @@ def objective(trial: optuna.Trial) -> float:
 
 if __name__ == "__main__":
     mlflow.set_experiment(cfg.experiment_name)
+    mlflow.set_experiment_tag("dataset", "toy")
+    mlflow.set_experiment_tag("model_family", "standard_unet")
 
     study = optuna.create_study(
         direction="minimize",
