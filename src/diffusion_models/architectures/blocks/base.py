@@ -274,10 +274,6 @@ class CrossChannelAttention(nn.Module):
         ffn_expansion_factor: int,
     ):
         super().__init__()
-        num_heads = min(
-            num_heads, feature_dim
-        )  # Ensure num_heads does not exceed feature_dim
-
         # MultiheadAttention operates on feature_dim (last dimension)
         self.transformer = _TransformerLayer(
             feature_dim, num_heads, ffn_expansion_factor
@@ -676,30 +672,77 @@ class PixelShuffle(nn.Module):
         return out
 
 
-class _TransformerLayer(nn.Module):
-    def __init__(self, channels, num_heads, ffn_expansion_factor):
+class SelfAttention(nn.Module):
+    """
+    Multi-head self-attention where each head sees the full hidden dimension.
+    Unlike torch.nn.MultiheadAttention, this does not split channels across heads.
+    """
+
+    def __init__(self, hidden_dim: int, num_heads: int):
         super().__init__()
-        self.attention = nn.MultiheadAttention(channels, num_heads, batch_first=True)
-        self.norm1 = nn.LayerNorm(channels)
-        self.mlp = nn.Sequential(
-            nn.Linear(channels, channels * ffn_expansion_factor),
-            nn.GELU(),
-            nn.Linear(channels * ffn_expansion_factor, channels),
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.q_projs = nn.ModuleList(
+            nn.Linear(hidden_dim, hidden_dim) for _ in range(num_heads)
         )
-        self.norm2 = nn.LayerNorm(channels)
+        self.k_projs = nn.ModuleList(
+            nn.Linear(hidden_dim, hidden_dim) for _ in range(num_heads)
+        )
+        self.v_projs = nn.ModuleList(
+            nn.Linear(hidden_dim, hidden_dim) for _ in range(num_heads)
+        )
+        self.head_out_projs = nn.ModuleList(
+            nn.Linear(hidden_dim, hidden_dim) for _ in range(num_heads)
+        )
+        self.merge = nn.Linear(num_heads * hidden_dim, hidden_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-        - x: (bs, seq_len, channels)
+        - x: (bs, seq_len, hidden_dim)
         Returns:
-        - x: (bs, seq_len, channels)
+        - out: (bs, seq_len, hidden_dim)
         """
-        # Self-attention with residual
-        attn_output, _ = self.attention(x, x, x)
-        x = self.norm1(attn_output + x)
+        head_outputs = []
+        scale = 1.0 / math.sqrt(self.hidden_dim)
 
-        # MLP with residual
-        mlp_output = self.mlp(x)
-        x = self.norm2(mlp_output + x)
+        for q_proj, k_proj, v_proj, out_proj in zip(
+            self.q_projs, self.k_projs, self.v_projs, self.head_out_projs
+        ):
+            q = q_proj(x)  # (bs, seq_len, hidden_dim)
+            k = k_proj(x)  # (bs, seq_len, hidden_dim)
+            v = v_proj(x)  # (bs, seq_len, hidden_dim)
+
+            attn_scores = (
+                torch.matmul(q, k.transpose(-1, -2)) * scale
+            )  # (bs, seq_len, seq_len)
+            attn = torch.softmax(attn_scores, dim=-1)
+            head = torch.matmul(attn, v)  # (bs, seq_len, hidden_dim)
+            head_outputs.append(out_proj(head))
+
+        x = torch.cat(head_outputs, dim=-1)  # (bs, seq_len, num_heads * hidden_dim)
+        return self.merge(x)  # (bs, seq_len, hidden_dim)
+
+
+class _TransformerLayer(nn.Module):
+    def __init__(self, hidden_dim: int, num_heads: int, ffn_expansion_factor: int):
+        super().__init__()
+        self.self_attn = SelfAttention(hidden_dim, num_heads)
+        self.norm1 = nn.LayerNorm(hidden_dim)
+        self.ffn = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim * ffn_expansion_factor),
+            nn.ReLU(),
+            nn.Linear(hidden_dim * ffn_expansion_factor, hidden_dim),
+        )
+        self.norm2 = nn.LayerNorm(hidden_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Self-attention block
+        attn_out = self.self_attn(x)
+        x = self.norm1(x + attn_out)
+
+        # Feedforward block
+        ffn_out = self.ffn(x)
+        x = self.norm2(x + ffn_out)
+
         return x

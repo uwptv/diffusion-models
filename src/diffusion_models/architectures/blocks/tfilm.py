@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from .base import SinusoidalEmbedding
+from .base import SinusoidalEmbedding, _TransformerLayer
 
 
 class TFiLM(nn.Module):
@@ -122,10 +122,10 @@ class TFiLMTransformer(nn.Module):
 
         self.layers = nn.ModuleList(
             [
-                _TFiLMTransformerLayer(
-                    d_model=self.channels,
+                _TransformerLayer(
+                    hidden_dim=self.channels,
                     num_heads=num_heads,
-                    dim_feedforward=ffn_dim_multiplier * channels,
+                    ffn_expansion_factor=ffn_dim_multiplier,
                 )
                 for _ in range(num_layers)
             ]
@@ -162,7 +162,7 @@ class TFiLMTransformer(nn.Module):
         # Transformer over blocks (sequence length = num_blocks)
         transformer_out = pooled
         for layer in self.layers:
-            transformer_out = layer(transformer_out, cond)
+            transformer_out = layer(transformer_out)
 
         # Affine params per block/channel
         params = self.to_params(transformer_out)  # (B, num_blocks, 2*C)
@@ -181,43 +181,3 @@ class TFiLMTransformer(nn.Module):
             out = out[:, :, :T_orig]
 
         return out
-
-
-class _TFiLMTransformerLayer(nn.Module):
-    def __init__(
-        self,
-        d_model: int,
-        num_heads: int,
-        dim_feedforward: int,
-    ) -> None:
-        super().__init__()
-        self.self_attn = nn.MultiheadAttention(
-            embed_dim=d_model, num_heads=num_heads, batch_first=True
-        )
-        self.norm = nn.LayerNorm(d_model)
-        self.mlp = nn.Sequential(
-            nn.Linear(d_model, dim_feedforward),
-            nn.SiLU(),
-            nn.Linear(dim_feedforward, d_model),
-        )
-
-    def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: (B, num_blocks, d_model = channels)
-            cond: (B, cond_dim)
-        Returns:
-            x: (B, num_blocks, d_model)
-        """
-        # Apply self-attention mechanism
-        attn_out, _ = self.self_attn(
-            x, x, x, need_weights=False
-        )  # (B, num_blocks, d_model)
-
-        # Pass through MLP
-        x = x + attn_out
-        x = self.norm(x)
-        ff = self.mlp(x)
-        x = x + ff
-        x = self.norm(x)
-        return x

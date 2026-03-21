@@ -45,6 +45,7 @@ def suggest_params(trial: optuna.Trial) -> dict:
         "hidden_dim": trial.suggest_categorical("hidden_dim", [128, 256, 384]),
         "num_layers": trial.suggest_categorical("num_layers", [6, 8, 10, 12]),
         "num_heads": trial.suggest_categorical("num_heads", [2, 4, 8]),
+        "learning_rate": trial.suggest_categorical("learning_rate", [1e-4, 5e-4, 1e-3]),
     }
 
 
