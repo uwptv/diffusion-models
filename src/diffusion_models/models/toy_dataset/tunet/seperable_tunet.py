@@ -24,6 +24,7 @@ cfg = TrainingConfig(
     experiment_name="seperable_tunet_v3",
     model_name="seperable_tunet_toy",
     evaluator="toy",
+    guidance_scales=[2.0],
 )
 
 # Initialize probability path
