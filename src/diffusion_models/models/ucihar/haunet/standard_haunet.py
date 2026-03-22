@@ -3,7 +3,7 @@ import optuna
 import torch
 from optuna.pruners import MedianPruner
 
-from diffusion_models.architectures.tunet import SeperableTUNet
+from diffusion_models.architectures.HAUNet import HAUNet
 from diffusion_models.data.loaders import DataSampler
 from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath
 from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
@@ -17,13 +17,13 @@ from diffusion_models.training_config import (
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 cfg = TrainingConfig(
-    dataset=DataSampler(),
+    dataset=DataSampler(dataset="uci_har"),
     num_classes=6,
     channels=3,
-    sequence_length=120,
-    experiment_name="seperable_tunet_wisdm_v3",
-    model_name="seperable_tunet_wisdm",
-    evaluator="wisdm",
+    sequence_length=128,
+    experiment_name="standard_haunet_uci_har",
+    model_name="standard_haunet_uci_har",
+    evaluator="ucihar",
     guidance_scales=[2.0],
 )
 
@@ -52,32 +52,28 @@ def suggest_params(trial: optuna.Trial) -> dict:
         ),
         "hidden_size_rnn": trial.suggest_categorical("hidden_size_rnn", [32, 64, 128]),
         "num_layers_rnn": trial.suggest_int("num_layers_rnn", 1, 2),
-        "num_heads": trial.suggest_categorical("num_heads", [2, 4, 8]),
-        "ffn_expansion_factor": trial.suggest_categorical(
-            "ffn_expansion_factor", [2, 4, 8]
-        ),
-        "filters_per_channel": trial.suggest_categorical(
-            "filters_per_channel", [2, 4, 8]
+        "num_cc_heads": trial.suggest_categorical("num_cc_heads", [1, 2, 4]),
+        "cc_expansion_factor": trial.suggest_categorical(
+            "cc_expansion_factor", [2, 4, 8]
         ),
         "learning_rate": trial.suggest_categorical("learning_rate", [1e-4, 5e-4, 1e-3]),
     }
 
 
-def build_model(hyperparams: dict) -> SeperableTUNet:
-    return SeperableTUNet(
+def build_model(hyperparams: dict) -> HAUNet:
+    return HAUNet(
         input_channels=cfg.channels,
         num_classes=cfg.num_classes,
-        initial_channels=hyperparams["initial_channels"],
+        initial_features=hyperparams["initial_channels"],
         levels=hyperparams["levels"],
         upsampling_method=hyperparams["upsampling_method"],
-        num_residual_layers=hyperparams["num_residual_layers"],
         cond_dim=hyperparams["cond_dim"],
+        num_residual_layers=hyperparams["num_residual_layers"],
         num_tfilm_blocks=hyperparams["num_tfilm_blocks"],
         hidden_size_rnn=hyperparams["hidden_size_rnn"],
         num_layers_rnn=hyperparams["num_layers_rnn"],
-        num_heads=hyperparams["num_heads"],
-        ffn_expansion_factor=hyperparams["ffn_expansion_factor"],
-        filters_per_channel=hyperparams["filters_per_channel"],
+        num_cc_heads=hyperparams["num_cc_heads"],
+        cc_expansion_factor=hyperparams["cc_expansion_factor"],
     )
 
 
@@ -95,8 +91,8 @@ def objective(trial: optuna.Trial) -> float:
 
 if __name__ == "__main__":
     mlflow.set_experiment(cfg.experiment_name)
-    mlflow.set_experiment_tag("dataset", "wisdm")
-    mlflow.set_experiment_tag("model_family", "seperable_tunet")
+    mlflow.set_experiment_tag("dataset", "uci_har")
+    mlflow.set_experiment_tag("model_family", "haunet")
 
     study = optuna.create_study(
         direction="minimize",

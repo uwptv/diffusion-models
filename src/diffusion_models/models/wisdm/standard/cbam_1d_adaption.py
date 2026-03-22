@@ -21,7 +21,7 @@ cfg = TrainingConfig(
     num_classes=6,
     channels=3,
     sequence_length=120,
-    experiment_name="cbam_unet_wisdm_v2",
+    experiment_name="cbam_unet_wisdm_v3",
     model_name="cbam_unet_wisdm",
     evaluator="wisdm",
 )
@@ -82,6 +82,8 @@ def objective(trial: optuna.Trial) -> float:
 
 if __name__ == "__main__":
     mlflow.set_experiment(cfg.experiment_name)
+    mlflow.set_experiment_tag("dataset", "wisdm")
+    mlflow.set_experiment_tag("model_family", "cbam_unet")
 
     study = optuna.create_study(
         direction="minimize",

@@ -24,6 +24,7 @@ cfg = TrainingConfig(
     experiment_name="dit_v3",
     model_name="dit_toy",
     evaluator="toy",
+    guidance_scales=[2.0],
     max_gflops=2.0,
     num_trials=50,
 )

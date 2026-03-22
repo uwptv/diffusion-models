@@ -24,6 +24,7 @@ cfg = TrainingConfig(
     experiment_name="tunet_v3",
     model_name="tunet_toy",
     evaluator="toy",
+    guidance_scales=[2.0],
 )
 
 # Initialize probability path
@@ -51,7 +52,7 @@ def suggest_params(trial: optuna.Trial) -> dict:
         ),
         "hidden_size_rnn": trial.suggest_categorical("hidden_size_rnn", [32, 64, 128]),
         "num_layers_rnn": trial.suggest_int("num_layers_rnn", 1, 2),
-        "num_heads": trial.suggest_categorical("num_heads", [2, 4, 8]),
+        "num_heads": trial.suggest_categorical("num_heads", [1, 2, 4]),
         "ffn_expansion_factor": trial.suggest_categorical(
             "ffn_expansion_factor", [2, 4, 8]
         ),

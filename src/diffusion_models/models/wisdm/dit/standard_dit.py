@@ -3,7 +3,7 @@ import optuna
 import torch
 from optuna.pruners import MedianPruner
 
-from diffusion_models.architectures.tunet import SeperableTUNet
+from diffusion_models.architectures.DiT import DiffusionTransformer
 from diffusion_models.data.loaders import DataSampler
 from diffusion_models.dynamics.prob_paths import GaussianConditionalProbabilityPath
 from diffusion_models.dynamics.schedules import LinearAlpha, LinearBeta
@@ -21,10 +21,12 @@ cfg = TrainingConfig(
     num_classes=6,
     channels=3,
     sequence_length=120,
-    experiment_name="seperable_tunet_wisdm_v3",
-    model_name="seperable_tunet_wisdm",
+    experiment_name="dit_wisdm_v3",
+    model_name="dit_wisdm",
     evaluator="wisdm",
     guidance_scales=[2.0],
+    max_gflops=2.0,
+    num_trials=50,
 )
 
 # Initialize probability path
@@ -40,44 +42,22 @@ seen_configs = set()
 
 def suggest_params(trial: optuna.Trial) -> dict:
     return {
-        "initial_channels": trial.suggest_categorical("initial_channels", [4, 8, 16]),
-        "levels": trial.suggest_int("levels", 1, 2),
         "cond_dim": trial.suggest_categorical("cond_dim", [48, 64]),
-        "upsampling_method": trial.suggest_categorical(
-            "upsampling_method", ["transposed", "interpolation", "pixel_shuffle"]
-        ),
-        "num_residual_layers": trial.suggest_int("num_residual_layers", 1, 2),
-        "num_tfilm_blocks": trial.suggest_categorical(
-            "num_tfilm_blocks", [2, 4, 8, 16]
-        ),
-        "hidden_size_rnn": trial.suggest_categorical("hidden_size_rnn", [32, 64, 128]),
-        "num_layers_rnn": trial.suggest_int("num_layers_rnn", 1, 2),
+        "hidden_dim": trial.suggest_categorical("hidden_dim", [128, 256, 384]),
+        "num_layers": trial.suggest_categorical("num_layers", [6, 8, 10, 12]),
         "num_heads": trial.suggest_categorical("num_heads", [2, 4, 8]),
-        "ffn_expansion_factor": trial.suggest_categorical(
-            "ffn_expansion_factor", [2, 4, 8]
-        ),
-        "filters_per_channel": trial.suggest_categorical(
-            "filters_per_channel", [2, 4, 8]
-        ),
         "learning_rate": trial.suggest_categorical("learning_rate", [1e-4, 5e-4, 1e-3]),
     }
 
 
-def build_model(hyperparams: dict) -> SeperableTUNet:
-    return SeperableTUNet(
-        input_channels=cfg.channels,
+def build_model(hyperparams: dict) -> DiffusionTransformer:
+    return DiffusionTransformer(
         num_classes=cfg.num_classes,
-        initial_channels=hyperparams["initial_channels"],
-        levels=hyperparams["levels"],
-        upsampling_method=hyperparams["upsampling_method"],
-        num_residual_layers=hyperparams["num_residual_layers"],
+        channels=cfg.channels,
         cond_dim=hyperparams["cond_dim"],
-        num_tfilm_blocks=hyperparams["num_tfilm_blocks"],
-        hidden_size_rnn=hyperparams["hidden_size_rnn"],
-        num_layers_rnn=hyperparams["num_layers_rnn"],
+        hidden_dim=hyperparams["hidden_dim"],
+        num_layers=hyperparams["num_layers"],
         num_heads=hyperparams["num_heads"],
-        ffn_expansion_factor=hyperparams["ffn_expansion_factor"],
-        filters_per_channel=hyperparams["filters_per_channel"],
     )
 
 
@@ -96,7 +76,7 @@ def objective(trial: optuna.Trial) -> float:
 if __name__ == "__main__":
     mlflow.set_experiment(cfg.experiment_name)
     mlflow.set_experiment_tag("dataset", "wisdm")
-    mlflow.set_experiment_tag("model_family", "seperable_tunet")
+    mlflow.set_experiment_tag("model_family", "dit")
 
     study = optuna.create_study(
         direction="minimize",

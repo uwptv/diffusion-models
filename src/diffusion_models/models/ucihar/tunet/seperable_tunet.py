@@ -17,13 +17,13 @@ from diffusion_models.training_config import (
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 cfg = TrainingConfig(
-    dataset=DataSampler(),
+    dataset=DataSampler(dataset="uci_har"),
     num_classes=6,
     channels=3,
-    sequence_length=120,
-    experiment_name="seperable_tunet_wisdm_v3",
-    model_name="seperable_tunet_wisdm",
-    evaluator="wisdm",
+    sequence_length=128,
+    experiment_name="seperable_tunet_uci_har",
+    model_name="seperable_tunet_uci_har",
+    evaluator="ucihar",
     guidance_scales=[2.0],
 )
 
@@ -95,7 +95,7 @@ def objective(trial: optuna.Trial) -> float:
 
 if __name__ == "__main__":
     mlflow.set_experiment(cfg.experiment_name)
-    mlflow.set_experiment_tag("dataset", "wisdm")
+    mlflow.set_experiment_tag("dataset", "uci_har")
     mlflow.set_experiment_tag("model_family", "seperable_tunet")
 
     study = optuna.create_study(

@@ -6,7 +6,7 @@ import torch.nn as nn
 from diffusion_models.dynamics.base import CFGVectorFieldODE
 from diffusion_models.dynamics.simulators import EulerSimulator
 
-from .blocks.base import Conditioner, FullHeadSelfAttention, SinusoidalEmbedding
+from .blocks.base import Conditioner, SelfAttention, SinusoidalEmbedding
 
 
 class DiffusionTransformer(nn.Module):
@@ -22,6 +22,7 @@ class DiffusionTransformer(nn.Module):
         y_dim: int = 16,
     ):
         super().__init__()
+        self.num_classes = num_classes
         self.linear1 = nn.Linear(channels, hidden_dim)
         self.linear2 = nn.Linear(hidden_dim, channels)
         self.pos_enc = SinusoidalEmbedding(hidden_dim)
@@ -126,14 +127,22 @@ class DiffusionTransformer(nn.Module):
 class DiTBlock(nn.Module):
     def __init__(self, hidden_dim: int, num_heads: int, cond_dim: int):
         super().__init__()
-        self.self_attn = FullHeadSelfAttention(hidden_dim, num_heads)
-        self.norm = nn.LayerNorm(hidden_dim)
-        self.mlp = nn.Linear(cond_dim, 6)
+        self.self_attn = SelfAttention(hidden_dim, num_heads)
+        self.norm1 = nn.LayerNorm(hidden_dim, elementwise_affine=False)
+        self.norm2 = nn.LayerNorm(hidden_dim, elementwise_affine=False)
         self.ffn = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim * 4),
             nn.GELU(),
             nn.Linear(hidden_dim * 4, hidden_dim),
         )
+        self.adaLN_modulation = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(cond_dim, 6 * hidden_dim),
+        )
+
+        # AdaLN-Zero initialization.
+        nn.init.zeros_(self.adaLN_modulation[-1].weight)
+        nn.init.zeros_(self.adaLN_modulation[-1].bias)
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> torch.Tensor:
         """
@@ -143,25 +152,18 @@ class DiTBlock(nn.Module):
         Returns:
         - out: (bs, seq_len, hidden_dim)
         """
-        factors = self.mlp(cond_embed)  # (bs, 6)
-        gamma_1, beta_1, alpha_1, gamma_2, beta_2, alpha_2 = [
-            f.unsqueeze(1) for f in factors.chunk(6, dim=-1)
-        ]  # Each (bs, 1, 1)
-        res = x
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
+            self.adaLN_modulation(cond_embed).chunk(6, dim=-1)
+        )
 
-        x = self.norm(x)
-        x = gamma_1 * x + beta_1
+        x_norm = self.norm1(x)
+        x_norm = x_norm * (1 + scale_msa.unsqueeze(1)) + shift_msa.unsqueeze(1)
+        attn_out = self.self_attn(x_norm)
+        x = x + gate_msa.unsqueeze(1) * attn_out
 
-        attn_out = self.self_attn(x)  # (bs, seq_len, hidden_dim)
-        attn_out = alpha_1 * attn_out
-        x = res + attn_out
+        x_norm = self.norm2(x)
+        x_norm = x_norm * (1 + scale_mlp.unsqueeze(1)) + shift_mlp.unsqueeze(1)
+        ffn_out = self.ffn(x_norm)
+        x = x + gate_mlp.unsqueeze(1) * ffn_out
 
-        res = x
-
-        x = self.norm(x)
-        x = gamma_2 * x + beta_2
-
-        ffn_out = self.ffn(x)  # (bs, seq_len, hidden_dim)
-        ffn_out = alpha_2 * ffn_out
-
-        return res + ffn_out
+        return x

@@ -50,7 +50,7 @@ def suggest_params(trial: optuna.Trial) -> dict:
             "num_tfilm_blocks", [2, 4, 8, 16]
         ),  # adapt constraint to more possible values
         "num_transformer_heads": trial.suggest_categorical(
-            "num_transformer_heads", [1, 2]
+            "num_transformer_heads", [1, 2, 4]
         ),
         "ffn_dim_multiplier": trial.suggest_categorical("ffn_dim_multiplier", [2, 4]),
         "learning_rate": trial.suggest_categorical("learning_rate", [1e-4, 5e-4, 1e-3]),

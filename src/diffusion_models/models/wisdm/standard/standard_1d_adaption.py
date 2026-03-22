@@ -22,7 +22,7 @@ cfg = TrainingConfig(
     num_classes=6,
     channels=3,
     sequence_length=120,
-    experiment_name="standard_unet_wisdm_v2",
+    experiment_name="standard_unet_wisdm_v3",
     model_name="standard_unet_wisdm",
     evaluator="wisdm",
 )
