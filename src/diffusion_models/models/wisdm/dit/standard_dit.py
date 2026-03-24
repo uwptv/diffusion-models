@@ -26,7 +26,7 @@ cfg = TrainingConfig(
     evaluator="wisdm",
     guidance_scales=[2.0],
     max_gflops=2.0,
-    num_trials=50,
+    num_trials=30,
 )
 
 # Initialize probability path

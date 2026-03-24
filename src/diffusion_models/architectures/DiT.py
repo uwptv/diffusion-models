@@ -75,8 +75,8 @@ class DiffusionTransformer(nn.Module):
         num_samples: int,
         p_data_shape: List[int],
         class_idx: int,
-        num_timesteps: int = 30,
-        guidance_scale: List[float] = [2.0, 3.0, 4.0],
+        num_timesteps: int = 10,
+        guidance_scale: float = 2.0,
         device: torch.device = None,
     ) -> torch.Tensor:
         """

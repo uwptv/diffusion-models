@@ -456,8 +456,6 @@ def main() -> None:
     cfg = get_dataset_cfg(run_cfg.dataset, datasets_dir=run_cfg.datasets_dir)
     if cfg.dataset_id == "wisdm":
         cfg.window_time = 6.0
-    if cfg.dataset_id == "uci_har":
-        cfg.sensor_channels = ["body_acc_x", "body_acc_y", "body_acc_z"]
     print(f"Using dataset: {cfg.dataset_id} with window_time={cfg.window_time}s")
     cfg.parallelize = bool(run_cfg.parallelize)
     cfg.num_folds = int(run_cfg.k_folds)

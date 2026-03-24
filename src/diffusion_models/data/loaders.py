@@ -76,7 +76,6 @@ class DataSampler(nn.Module, Sampleable):
         cfg = get_dataset_cfg(dataset_id)
         # cfg.parallelize = True
         if dataset_id == WHARDatasetID.UCI_HAR:
-            cfg.sensor_channels = ["body_acc_x", "body_acc_y", "body_acc_z"]
             cfg.window_time = 2.56  # 128 timesteps at 50Hz
         else:
             cfg.window_time = window_time
@@ -190,7 +189,7 @@ class DataSampler(nn.Module, Sampleable):
         )  # (batch_size, 1, signal_length, channels)
         samples = samples.squeeze(1).permute(
             0, 2, 1
-        )  # (batch_size, signal_length, channels)
+        )  # (batch_size, channels, signal_length)
 
         activity_labels = (
             torch.from_numpy(labels_np)
@@ -295,15 +294,26 @@ class DataSampler(nn.Module, Sampleable):
 
 
 def visualize_wisdm_samples(
-    samples: torch.Tensor, labels: torch.Tensor, num_plots: int = 4
-):
+    samples: torch.Tensor,
+    labels: torch.Tensor,
+    num_plots: int | None = None,
+    num_samples_per_class: int = 2,
+    class_names: list[str] | None = None,
+    save_path: str | None = None,
+) -> dict[tuple[int, int], torch.Tensor]:
     """
-    Visualize WISDM time series samples with their activity labels.
+    Visualize WISDM time series samples in a UNet-style grid.
 
     Args:
         samples: shape (batch_size, channels, signal_length)
         labels: shape (batch_size, label_dim) - activity class indices
-        num_plots: number of samples to visualize
+        num_plots: Optional max number of classes to visualize
+        num_samples_per_class: Number of samples to plot per class (as columns)
+        class_names: Optional list of class names for plot titles
+        save_path: Optional path to save the figure
+
+    Returns:
+        Dict mapping (class_id, sample_col) -> sample tensor of shape (1, channels, length)
     """
 
     # Activity mapping (adjust based on your dataset's activity classes)
@@ -316,46 +326,87 @@ def visualize_wisdm_samples(
         5: "Standing",
     }
 
-    num_plots = min(num_plots, samples.shape[0])
-    fig, axes = plt.subplots(num_plots, 1, figsize=(14, 3 * num_plots))
+    if labels.ndim > 1:
+        labels_1d = labels[:, 0]
+    else:
+        labels_1d = labels
 
-    if num_plots == 1:
-        axes = [axes]
+    labels_1d = labels_1d.detach().cpu().to(torch.long)
 
-    for idx in range(num_plots):
-        sample = samples[idx].cpu().detach().numpy()  # shape: (channels, signal_length)
-        label = labels[idx].item() if labels[idx].dim() == 0 else labels[idx, 0].item()
-        activity_name = activity_names.get(label, f"Activity {label}")
+    if num_samples_per_class < 1:
+        raise ValueError(
+            f"num_samples_per_class must be >= 1, got {num_samples_per_class}"
+        )
 
-        ax = axes[idx]
-        signal_length = sample.shape[1]
-        time_axis = range(signal_length)
+    # Keep up to num_samples_per_class occurrences for each class.
+    class_to_indices: dict[int, list[int]] = {}
+    for idx, cls in enumerate(labels_1d.tolist()):
+        if cls not in class_to_indices:
+            class_to_indices[cls] = []
+        if len(class_to_indices[cls]) < num_samples_per_class:
+            class_to_indices[cls].append(idx)
 
-        # Plot each channel
-        channel_names = ["X-axis", "Y-axis", "Z-axis"]
-        colors = ["#FF6B6B", "#4ECDC4", "#C8D145"]
+    unique_classes = sorted(class_to_indices.keys())
+    if num_plots is not None:
+        unique_classes = unique_classes[:num_plots]
 
-        for channel in range(sample.shape[0]):
-            ax.plot(
-                time_axis,
-                sample[channel],
-                label=channel_names[channel],
-                color=colors[channel],
-                linewidth=1.5,
-                alpha=0.8,
+    if not unique_classes:
+        raise ValueError("No class samples available to visualize.")
+
+    num_rows = len(unique_classes)
+    num_cols = num_samples_per_class
+    fig, axes = plt.subplots(
+        num_rows, num_cols, figsize=(5 * num_cols, 4 * num_rows), squeeze=False
+    )
+
+    all_samples: dict[tuple[int, int], torch.Tensor] = {}
+
+    channel_names = [f"Ch {ch}" for ch in range(samples.shape[1])]
+
+    for row_idx, label in enumerate(unique_classes):
+        sample_indices = class_to_indices[label]
+        activity_name = (
+            class_names[label]
+            if class_names is not None and 0 <= label < len(class_names)
+            else activity_names.get(label, f"Class {label}")
+        )
+
+        for col_idx in range(num_cols):
+            # If there are fewer samples than requested for this class, repeat the last one.
+            sample_idx = sample_indices[min(col_idx, len(sample_indices) - 1)]
+            sample = (
+                samples[sample_idx].cpu().detach().numpy()
+            )  # (channels, signal_length)
+            ax = axes[row_idx, col_idx]
+            all_samples[(label, col_idx)] = (
+                samples[sample_idx : sample_idx + 1].detach().cpu()
             )
 
-        ax.set_xlabel("Time Steps")
-        ax.set_ylabel("Acceleration")
-        ax.set_title(f"Activity: {activity_name} (Label: {label})")
-        ax.legend(loc="upper right")
-        ax.grid(True, alpha=0.3)
+            for channel in range(sample.shape[0]):
+                ax.plot(sample[channel], linewidth=1.0, label=channel_names[channel])
+
+            ax.set_ylabel("Value")
+            ax.set_title(
+                f"{activity_name} | class={label} | sample={col_idx + 1}", fontsize=10
+            )
+            ax.grid(True, alpha=0.3)
+            ax.set_xticks([])
+            if sample.shape[0] <= 5:
+                ax.legend(fontsize=8)
 
     plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"Figure saved to {save_path}")
+
     plt.show()
+    plt.close()
+
+    return all_samples
 
 
 if __name__ == "__main__":
     sampler = DataSampler()
-    samples, labels = sampler.sample(num_samples=4, subset="train")
-    visualize_wisdm_samples(samples, labels, num_plots=4)
+    samples, labels = sampler.sample(num_samples=12, subset="train")
+    visualize_wisdm_samples(samples, labels, num_plots=6, num_samples_per_class=2)

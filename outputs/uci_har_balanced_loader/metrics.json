@@ -10,37 +10,37 @@
   "folds": [
     {
       "fold": "fold_0",
-      "test_loss": 0.46156703597620913,
-      "accuracy": 0.8047368421052632,
-      "f1_macro": 0.8108215453536175
+      "test_loss": 0.19470721897326018,
+      "accuracy": 0.9315789473684211,
+      "f1_macro": 0.9313368514885222
     },
     {
       "fold": "fold_1",
-      "test_loss": 0.5811535367212798,
-      "accuracy": 0.7542105263157894,
-      "f1_macro": 0.7623207779584914
+      "test_loss": 0.15378188759088515,
+      "accuracy": 0.9415789473684211,
+      "f1_macro": 0.9419759949747073
     },
     {
       "fold": "fold_2",
-      "test_loss": 0.5687502022793418,
-      "accuracy": 0.7536842105263157,
-      "f1_macro": 0.7589839870421659
+      "test_loss": 0.14633978032752087,
+      "accuracy": 0.9442105263157895,
+      "f1_macro": 0.9422150879991236
     },
     {
       "fold": "fold_3",
-      "test_loss": 0.5423771090256541,
-      "accuracy": 0.7842105263157895,
-      "f1_macro": 0.7871123594513733
+      "test_loss": 0.12931927200994994,
+      "accuracy": 0.9521052631578948,
+      "f1_macro": 0.9531859582784379
     },
     {
       "fold": "fold_4",
-      "test_loss": 0.5974364413783197,
-      "accuracy": 0.7293312269615587,
-      "f1_macro": 0.7354480679473482
+      "test_loss": 0.12901913561025,
+      "accuracy": 0.9536598209583992,
+      "f1_macro": 0.9541936230539688
     }
   ],
-  "mean_accuracy": 0.7652346664449433,
-  "mean_f1_macro": 0.7709373475505992,
+  "mean_accuracy": 0.944626701033785,
+  "mean_f1_macro": 0.944581503158952,
   "per_fold_confusion_matrices": {
     "fold_0": "outputs\\uci_har_balanced_loader\\confusion_matrix_fold_0.png",
     "fold_1": "outputs\\uci_har_balanced_loader\\confusion_matrix_fold_1.png",

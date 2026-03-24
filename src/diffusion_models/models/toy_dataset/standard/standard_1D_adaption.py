@@ -21,8 +21,8 @@ cfg = TrainingConfig(
     num_classes=3,
     channels=3,
     sequence_length=128,
-    experiment_name="standard_unet_v2",
-    model_name="standard_unet_toy",
+    experiment_name="standard_unet_bigger_v2",
+    model_name="standard_unet_bigger_toy",
     evaluator="toy",
 )
 
@@ -39,9 +39,11 @@ seen_configs = set()
 
 def suggest_params(trial: optuna.Trial) -> dict:
     return {
-        "initial_channels": trial.suggest_categorical("initial_channels", [4, 8, 16]),
+        "initial_channels": trial.suggest_categorical(
+            "initial_channels", [4, 8, 16, 32]
+        ),
         "levels": trial.suggest_int("levels", 1, 2),
-        "num_residual_layers": trial.suggest_int("num_residual_layers", 1, 2),
+        "num_residual_layers": trial.suggest_int("num_residual_layers", 1, 4),
         "cond_dim": trial.suggest_categorical("cond_dim", [48, 64]),
         "upsampling_method": trial.suggest_categorical(
             "upsampling_method", ["transposed", "interpolation", "pixel_shuffle"]

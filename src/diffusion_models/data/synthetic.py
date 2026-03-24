@@ -221,16 +221,94 @@ class WaveSampler(nn.Module, Sampleable):
 
         return waves, labels
 
+    @torch.no_grad()
+    def visualize(
+        self,
+        class_idx: int | None = None,
+        num_samples_per_class: int = 1,
+        mean: float = 4.0,
+        std: float = 2.0,
+        normalize: bool = False,
+        class_names: List[str] | None = None,
+        save_path: str | None = None,
+    ) -> dict:
+        """
+        Visualize sampled waves in a grid, matching UNet visualization style.
+
+        Rows correspond to classes, columns to samples per class.
+        """
+        if num_samples_per_class < 1:
+            raise ValueError(
+                f"num_samples_per_class must be >= 1, got {num_samples_per_class}"
+            )
+
+        if class_idx is None:
+            class_indices = list(range(len(self.amplitudes)))
+        else:
+            if not 0 <= class_idx < len(self.amplitudes):
+                raise ValueError(
+                    f"class_idx must be in [0, {len(self.amplitudes) - 1}], got {class_idx}"
+                )
+            class_indices = [class_idx]
+
+        num_rows = len(class_indices)
+        num_cols = num_samples_per_class
+
+        fig, axes = plt.subplots(
+            num_rows, num_cols, figsize=(5 * num_cols, 4 * num_rows), squeeze=False
+        )
+
+        all_samples: dict[tuple[int, int], torch.Tensor] = {}
+
+        for r, cls_idx in enumerate(class_indices):
+            samples, _ = self.sample(
+                num_samples=num_samples_per_class,
+                mean=mean,
+                std=std,
+                class_idx=cls_idx,
+                normalize=normalize,
+            )
+
+            if normalize:
+                samples = self.denormalize(samples)
+
+            for c in range(num_cols):
+                ax = axes[r, c]
+                sample = samples[c]  # (channels, length)
+                all_samples[(cls_idx, c)] = sample.unsqueeze(0)
+                sample_np = sample.detach().cpu().numpy()
+
+                for ch in range(sample_np.shape[0]):
+                    ax.plot(sample_np[ch], linewidth=1.0, label=f"Ch {ch}")
+
+                cls_name = (
+                    class_names[cls_idx]
+                    if class_names is not None and 0 <= cls_idx < len(class_names)
+                    else f"Class {cls_idx}"
+                )
+                ax.set_title(f"{cls_name} | sample={c + 1}", fontsize=10)
+                ax.set_xlabel("Time")
+                ax.set_ylabel("Value")
+                ax.grid(True, alpha=0.3)
+                if sample_np.shape[0] <= 5:
+                    ax.legend(fontsize=8)
+
+        fig.suptitle("Sampled synthetic waves", fontsize=14, fontweight="bold")
+        plt.tight_layout()
+
+        if save_path:
+            plt.savefig(save_path, dpi=150, bbox_inches="tight")
+            print(f"Figure saved to {save_path}")
+
+        plt.show()
+        plt.close()
+
+        return all_samples
+
 
 if __name__ == "__main__":
     sampler = WaveSampler()
-    samples, labels = sampler.sample(num_samples=1000)
-
-    plt.figure(figsize=(10, 5))
-    for j in range(1):
-        for i in range(3):
-            plt.subplot(3, 1, i + 1)
-            plt.plot(samples[j, i].cpu().detach().numpy())
-            plt.title(f"Wave {i + 1}")
-        plt.tight_layout()
-        plt.show()
+    sampler.visualize(
+        num_samples_per_class=2,
+        class_names=[f"amp{a}" for a in sampler.amplitudes],
+    )

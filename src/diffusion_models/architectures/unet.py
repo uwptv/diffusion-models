@@ -142,7 +142,7 @@ class UNet(ConditionalVectorField, ABC):
         dataset_std: torch.Tensor | None = None,
         class_idx: int | None = None,
         num_timesteps: int = 30,
-        guidance_scales: List[float] = [2.0, 3.0, 4.0],
+        guidance_scales: List[float] = [2.0, 4.0],
         class_names: List[str] | None = None,
         save_path: str | None = None,
         device: torch.device = None,
@@ -208,13 +208,11 @@ class UNet(ConditionalVectorField, ABC):
                 )
 
                 ax.set_title(f"{cls_name} | guidance={gs}", fontsize=10)
-                ax.set_xlabel("Time")
-                ax.set_ylabel("Value")
                 ax.grid(True, alpha=0.3)
+                ax.set_xticks([])
                 if num_channels <= 5:
                     ax.legend(fontsize=8)
 
-        fig.suptitle("Generated samples (1 per cell)", fontsize=14, fontweight="bold")
         plt.tight_layout()
 
         if save_path:

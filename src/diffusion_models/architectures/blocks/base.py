@@ -329,11 +329,12 @@ class AdaGroupNorm(nn.Module):
         self.group_norm = nn.GroupNorm(num_groups, num_channels, affine=False, eps=1e-6)
         if cond_dim > 0:
             self.linear = nn.Linear(cond_dim, 2 * num_channels)
-        # outputs scale (γ) and shift (β)
-        # Initialize to do nothing at start (γ ≈ 1, β ≈ 0)
-
-        nn.init.zeros_(self.linear.weight)
-        nn.init.zeros_(self.linear.bias)
+            # outputs scale (gamma) and shift (beta)
+            # Initialize to do nothing at start (gamma ~= 1, beta ~= 0)
+            nn.init.zeros_(self.linear.weight)
+            nn.init.zeros_(self.linear.bias)
+        else:
+            self.linear = None
 
     def forward(
         self, x: torch.Tensor, cond: torch.Tensor | None = None
@@ -348,8 +349,8 @@ class AdaGroupNorm(nn.Module):
 
         x = self.group_norm(x)  # (B, C, ...)
 
-        # If no conditioning is provided, return normalized x
-        if cond is None:
+        # If no conditioning is provided (or supported), return normalized x
+        if cond is None or self.linear is None:
             return x
 
         gamma, beta = self.linear(cond).chunk(2, dim=1)  # (B, C)

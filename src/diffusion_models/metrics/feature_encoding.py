@@ -29,6 +29,7 @@ def extract_features(
         "toy": TinyHARToy,
         "ucihar": TinyHARucihar,
     }
+    print(f"Extracting features using {evaluator} TinyHAR model...")
     model = model_dict.get(evaluator)
     with torch.no_grad():
         for i in range(0, len(data), batch_size):

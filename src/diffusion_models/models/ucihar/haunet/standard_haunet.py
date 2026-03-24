@@ -19,12 +19,13 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 cfg = TrainingConfig(
     dataset=DataSampler(dataset="uci_har"),
     num_classes=6,
-    channels=3,
+    channels=9,
     sequence_length=128,
     experiment_name="standard_haunet_uci_har",
     model_name="standard_haunet_uci_har",
     evaluator="ucihar",
     guidance_scales=[2.0],
+    num_trials=1,
 )
 
 # Initialize probability path
@@ -40,23 +41,19 @@ seen_configs = set()
 
 def suggest_params(trial: optuna.Trial) -> dict:
     return {
-        "initial_channels": trial.suggest_categorical("initial_channels", [4, 8, 16]),
-        "levels": trial.suggest_int("levels", 1, 2),
-        "cond_dim": trial.suggest_categorical("cond_dim", [48, 64]),
+        "initial_channels": trial.suggest_categorical("initial_channels", [16]),
+        "levels": trial.suggest_int("levels", 2, 2),
+        "cond_dim": trial.suggest_categorical("cond_dim", [48]),
         "upsampling_method": trial.suggest_categorical(
-            "upsampling_method", ["transposed", "interpolation", "pixel_shuffle"]
+            "upsampling_method", ["transposed"]
         ),
-        "num_residual_layers": trial.suggest_int("num_residual_layers", 1, 2),
-        "num_tfilm_blocks": trial.suggest_categorical(
-            "num_tfilm_blocks", [2, 4, 8, 16]
-        ),
-        "hidden_size_rnn": trial.suggest_categorical("hidden_size_rnn", [32, 64, 128]),
-        "num_layers_rnn": trial.suggest_int("num_layers_rnn", 1, 2),
-        "num_cc_heads": trial.suggest_categorical("num_cc_heads", [1, 2, 4]),
-        "cc_expansion_factor": trial.suggest_categorical(
-            "cc_expansion_factor", [2, 4, 8]
-        ),
-        "learning_rate": trial.suggest_categorical("learning_rate", [1e-4, 5e-4, 1e-3]),
+        "num_residual_layers": trial.suggest_int("num_residual_layers", 1, 1),
+        "num_tfilm_blocks": trial.suggest_categorical("num_tfilm_blocks", [4]),
+        "hidden_size_rnn": trial.suggest_categorical("hidden_size_rnn", [128]),
+        "num_layers_rnn": trial.suggest_int("num_layers_rnn", 2, 2),
+        "num_cc_heads": trial.suggest_categorical("num_cc_heads", [4]),
+        "cc_expansion_factor": trial.suggest_categorical("cc_expansion_factor", [2]),
+        "learning_rate": trial.suggest_categorical("learning_rate", [1e-3]),
     }
 
 

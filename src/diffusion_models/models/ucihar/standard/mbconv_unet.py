@@ -19,11 +19,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 cfg = TrainingConfig(
     dataset=DataSampler(dataset="uci_har"),
     num_classes=6,
-    channels=3,
+    channels=9,
     sequence_length=128,
-    experiment_name="mbconv_unet_uci_har",
+    experiment_name="mbconv_unet_uci_har_v2",
     model_name="mbconv_unet_uci_har",
     evaluator="ucihar",
+    guidance_scales=[2.0],
 )
 
 # Initialize probability path
